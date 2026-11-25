@@ -196,13 +196,16 @@ fn manifest_load_from_demo_game_dir_and_file() {
     let from_file = load_manifest_from_path(&file).expect("loading direct game.toml should work");
 
     assert_eq!(from_dir, from_file);
-    assert_eq!(from_dir.game.title, "FGE Phase 1 Demo");
+    assert_eq!(from_dir.game.title, "FGE Phase 3 Demo");
     assert_eq!(from_dir.game.width, 1280);
     assert_eq!(from_dir.game.height, 720);
     assert_eq!(from_dir.game.target_fps, 60);
     assert!(!from_dir.game.vsync);
     assert_eq!(from_dir.build.entry, "src/main.c");
-    assert_eq!(from_dir.build.sources, vec![String::from("src/main.c")]);
+    assert_eq!(
+        from_dir.build.sources,
+        vec![String::from("src/player.c"), String::from("src/enemy.c")]
+    );
 }
 
 #[test]

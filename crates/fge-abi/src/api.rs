@@ -385,7 +385,58 @@ pub extern "C" fn fge_mouse_wheel() -> FgeVec2 {
     .unwrap_or_default()
 }
 
-/// Forces the linker to retain all exported `fge_*` C-ABI symbols.
+/// Forces the linker to retain all 42 exported `fge_*` C-ABI symbols so `dlopen`-loaded
+/// game modules can resolve them against host binaries linked with `-Wl,--export-dynamic`.
 pub fn ensure_abi_symbols_linked() -> usize {
-    todo!()
+    let symbols: [usize; 42] = [
+        // Lifecycle & Timing (6)
+        fge_delta_time as *const () as usize,
+        fge_frame_count as *const () as usize,
+        fge_entity_count as *const () as usize,
+        fge_request_quit as *const () as usize,
+        fge_rand_f32 as *const () as usize,
+        fge_rand_range as *const () as usize,
+        // Entity Lifecycle (4)
+        fge_entity_spawn as *const () as usize,
+        fge_spawn_sprite as *const () as usize,
+        fge_entity_despawn as *const () as usize,
+        fge_entity_is_alive as *const () as usize,
+        // Transform & Kinematics (9)
+        fge_set_position as *const () as usize,
+        fge_get_position as *const () as usize,
+        fge_set_velocity as *const () as usize,
+        fge_get_velocity as *const () as usize,
+        fge_set_size as *const () as usize,
+        fge_get_size as *const () as usize,
+        fge_set_rotation as *const () as usize,
+        fge_get_rotation as *const () as usize,
+        fge_set_angular_velocity as *const () as usize,
+        // Appearance & Ordering (6)
+        fge_set_color as *const () as usize,
+        fge_get_color as *const () as usize,
+        fge_set_uv_rect as *const () as usize,
+        fge_set_z_order as *const () as usize,
+        fge_set_flags as *const () as usize,
+        fge_get_flags as *const () as usize,
+        // Gameplay Metadata & Collision Broadphase/Narrowphase (9)
+        fge_set_collider as *const () as usize,
+        fge_set_tag as *const () as usize,
+        fge_get_tag as *const () as usize,
+        fge_set_hp as *const () as usize,
+        fge_get_hp as *const () as usize,
+        fge_detect_collisions as *const () as usize,
+        fge_get_collision as *const () as usize,
+        fge_query_circle as *const () as usize,
+        fge_get_query_entity as *const () as usize,
+        // Camera & Input (8)
+        fge_camera_set as *const () as usize,
+        fge_camera_get as *const () as usize,
+        fge_key_down as *const () as usize,
+        fge_key_pressed as *const () as usize,
+        fge_key_released as *const () as usize,
+        fge_mouse_down as *const () as usize,
+        fge_mouse_pos as *const () as usize,
+        fge_mouse_wheel as *const () as usize,
+    ];
+    std::hint::black_box(symbols).len()
 }

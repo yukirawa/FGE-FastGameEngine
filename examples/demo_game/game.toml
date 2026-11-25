@@ -1,5 +1,5 @@
 [game]
-title = "FGE Phase 1 Demo"
+title = "FGE Phase 3 Demo"
 width = 1280
 height = 720
 target_fps = 60
@@ -7,4 +7,4 @@ vsync = false
 
 [build]
 entry = "src/main.c"
-sources = ["src/main.c"]
+sources = ["src/player.c", "src/enemy.c"]
