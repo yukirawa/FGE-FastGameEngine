@@ -4,6 +4,7 @@ members = [
     "crates/fge-core",
     "crates/fge-abi",
     "crates/fge-loader",
+    "crates/fge-bridge",
     "crates/fge-render",
     "crates/fge",
 ]
@@ -17,6 +18,7 @@ license = "MIT OR Apache-2.0"
 fge-core = { path = "crates/fge-core" }
 fge-abi = { path = "crates/fge-abi" }
 fge-loader = { path = "crates/fge-loader" }
+fge-bridge = { path = "crates/fge-bridge" }
 fge-render = { path = "crates/fge-render" }
 wgpu = "30.0.1"
 winit = "0.30.13"

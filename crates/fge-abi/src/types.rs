@@ -41,9 +41,19 @@ pub struct FgeCamera {
     pub zoom: f32,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FgeAiEvent {
+    pub kind: u32,
+    pub target: FgeEntity,
+    pub arg0: f32,
+    pub arg1: f32,
+}
+
 const _: () = assert!(core::mem::size_of::<FgeEntity>() == 8);
 const _: () = assert!(core::mem::size_of::<FgeVec2>() == 8);
 const _: () = assert!(core::mem::size_of::<FgeColor>() == 4);
 const _: () = assert!(core::mem::size_of::<FgeUvRect>() == 8);
 const _: () = assert!(core::mem::size_of::<FgeCamera>() == 20);
 const _: () = assert!(core::mem::size_of::<FgeCollisionPair>() == 16);
+const _: () = assert!(core::mem::size_of::<FgeAiEvent>() == 20);

@@ -12,6 +12,9 @@ pub enum AppError {
     #[error("loader error: {0}")]
     Loader(#[from] fge_loader::error::LoaderError),
 
+    #[error("bridge error: {0}")]
+    Bridge(#[from] fge_bridge::error::BridgeError),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 

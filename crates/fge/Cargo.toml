@@ -16,6 +16,7 @@ path = "src/main.rs"
 fge-core.workspace = true
 fge-abi.workspace = true
 fge-loader.workspace = true
+fge-bridge.workspace = true
 fge-render.workspace = true
 wgpu.workspace = true
 winit.workspace = true

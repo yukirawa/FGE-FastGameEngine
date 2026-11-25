@@ -11,6 +11,8 @@ use fge_core::{
     world::EntityWorld,
 };
 
+use crate::types::FgeAiEvent;
+
 const DEFAULT_SPATIAL_CELL_SIZE: f32 = 64.0;
 const DEFAULT_SPATIAL_BUCKETS: usize = 4096;
 
@@ -56,6 +58,10 @@ pub struct EngineContext {
     pub quit_requested: bool,
     pub last_collisions: Vec<CollisionPair>,
     pub last_query_entities: Vec<EntityId>,
+    pub params: Vec<(u32, f32)>,
+    pub pending_ai_events: Vec<FgeAiEvent>,
+    pub active_ai_events: Vec<FgeAiEvent>,
+    pub metrics: Vec<(u32, f32)>,
 }
 
 impl EngineContext {
@@ -78,7 +84,35 @@ impl EngineContext {
             quit_requested: false,
             last_collisions: Vec::new(),
             last_query_entities: Vec::new(),
+            params: Vec::new(),
+            pending_ai_events: Vec::new(),
+            active_ai_events: Vec::new(),
+            metrics: Vec::new(),
         })
+    }
+
+    #[allow(unused_variables)]
+    pub fn set_param(&mut self, id: u32, value: f32) {
+        todo!()
+    }
+
+    #[allow(unused_variables)]
+    pub fn get_param(&self, id: u32, default_val: f32) -> f32 {
+        todo!()
+    }
+
+    #[allow(unused_variables)]
+    pub fn push_ai_event(&mut self, event: FgeAiEvent) {
+        todo!()
+    }
+
+    pub fn poll_ai_events(&mut self) -> u32 {
+        todo!()
+    }
+
+    #[allow(unused_variables)]
+    pub fn record_metric(&mut self, id: u32, value: f32) {
+        todo!()
     }
 
     /// Advances frame counters, runs `callback` while `self` is bound as the active C-ABI

@@ -8,4 +8,5 @@ license.workspace = true
 fge-core.workspace = true
 glam.workspace = true
 fastrand.workspace = true
+serde.workspace = true
 thiserror.workspace = true

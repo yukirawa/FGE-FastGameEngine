@@ -16,6 +16,8 @@ pub enum Command {
     Bench(BenchArgs),
     /// Load a `game.toml` project directory and launch the engine window.
     Run(RunArgs),
+    /// Run a `game.toml` project headlessly without GPU/windowing and emit diagnostics.
+    Test(TestArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Args)]
@@ -74,6 +76,33 @@ pub struct RunArgs {
     /// Disable C source polling and live hot-reload while running.
     #[arg(long, default_value_t = false)]
     pub no_hot_reload: bool,
+
+    /// Optional TCP address to listen on for live AI Bridge JSON-RPC connections (e.g. `127.0.0.1:7777`).
+    #[arg(long)]
+    pub bridge: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Args)]
+pub struct TestArgs {
+    /// Path to the game directory containing `game.toml` (or direct path to `game.toml`).
+    #[arg(default_value = ".")]
+    pub project_dir: PathBuf,
+
+    /// Number of simulation frames to execute.
+    #[arg(long, default_value_t = 300)]
+    pub frames: u64,
+
+    /// Deterministic PRNG seed for the simulation.
+    #[arg(long, default_value_t = 42)]
+    pub seed: u64,
+
+    /// Fixed timestep in seconds per frame.
+    #[arg(long, default_value_t = 1.0 / 60.0)]
+    pub dt: f32,
+
+    /// Print the full `HeadlessTestReport` as pretty JSON to stdout.
+    #[arg(long, default_value_t = false)]
+    pub dump_json: bool,
 }
 
 /// Parses CLI arguments from an arbitrary iterator (test-friendly wrapper).

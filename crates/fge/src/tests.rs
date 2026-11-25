@@ -106,6 +106,7 @@ fn cli_run_with_path_and_flags() {
             frames: 60,
             offscreen: true,
             no_hot_reload: false,
+            bridge: None,
         })
     );
 }
@@ -120,6 +121,7 @@ fn cli_run_defaults() {
             frames: 0,
             offscreen: false,
             no_hot_reload: false,
+            bridge: None,
         })
     );
 }

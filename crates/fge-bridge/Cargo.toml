@@ -1,0 +1,15 @@
+[package]
+name = "fge-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fge-core.workspace = true
+fge-abi.workspace = true
+fge-loader.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true

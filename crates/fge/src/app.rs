@@ -86,6 +86,7 @@ pub fn execute_cli(cli: Cli) -> Result<Option<BenchSummary>, AppError> {
             Ok(Some(summary))
         }
         Command::Run(args) => run_project(&args),
+        Command::Test(_args) => todo!(),
     }
 }
 
@@ -682,4 +683,11 @@ impl ApplicationHandler for WindowedGameApp<'_> {
             window.request_redraw();
         }
     }
+}
+
+/// Executes a `game.toml` project headlessly via `fge-bridge` and returns a structured report.
+pub fn run_test_cmd(
+    _args: &crate::cli::TestArgs,
+) -> Result<fge_bridge::snapshot::HeadlessTestReport, crate::error::AppError> {
+    todo!()
 }

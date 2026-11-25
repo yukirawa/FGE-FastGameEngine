@@ -58,6 +58,13 @@ typedef struct FgeCollisionPair {
     FgeEntity b;
 } FgeCollisionPair;
 
+typedef struct FgeAiEvent {
+    uint32_t kind;
+    FgeEntity target;
+    float arg0;
+    float arg1;
+} FgeAiEvent;
+
 /* ==========================================================================
  * 2. Entity Flags & Key Codes
  * ========================================================================== */
@@ -187,6 +194,13 @@ bool      fge_key_released(uint32_t key);
 bool      fge_mouse_down(uint32_t button);
 FgeVec2   fge_mouse_pos(void);
 FgeVec2   fge_mouse_wheel(void);
+
+/* AI Bridge Mailbox & Telemetry */
+void       fge_param_set(uint32_t param_id, float value);
+float      fge_param_get(uint32_t param_id, float default_val);
+uint32_t   fge_poll_ai_events(void);
+FgeAiEvent fge_get_ai_event(uint32_t index);
+void       fge_log_metric(uint32_t metric_id, float value);
 
 /* Game Module Entrypoints (Implemented by user C code in Phase A) */
 void fge_init(void);

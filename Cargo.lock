@@ -528,6 +528,7 @@ dependencies = [
  "clap",
  "env_logger",
  "fge-abi",
+ "fge-bridge",
  "fge-core",
  "fge-loader",
  "fge-render",
@@ -548,6 +549,21 @@ dependencies = [
  "fastrand",
  "fge-core",
  "glam",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fge-bridge"
+version = "0.1.0"
+dependencies = [
+ "fge-abi",
+ "fge-core",
+ "fge-loader",
+ "glam",
+ "log",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

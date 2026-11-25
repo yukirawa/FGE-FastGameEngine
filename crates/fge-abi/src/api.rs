@@ -16,7 +16,7 @@ use glam::Vec2;
 
 use crate::{
     context::try_with_context_mut,
-    types::{FgeCamera, FgeCollisionPair, FgeColor, FgeEntity, FgeUvRect, FgeVec2},
+    types::{FgeAiEvent, FgeCamera, FgeCollisionPair, FgeColor, FgeEntity, FgeUvRect, FgeVec2},
 };
 
 const INVALID_COLLISION_PAIR: FgeCollisionPair = CollisionPair {
@@ -383,6 +383,39 @@ pub extern "C" fn fge_mouse_wheel() -> FgeVec2 {
         y: ctx.input.mouse_wheel[1],
     })
     .unwrap_or_default()
+}
+
+// ============================================================================
+// AI Bridge Mailbox & Telemetry
+// ============================================================================
+
+#[no_mangle]
+#[allow(unused_variables)]
+pub extern "C" fn fge_param_set(param_id: u32, value: f32) {
+    todo!()
+}
+
+#[no_mangle]
+#[allow(unused_variables)]
+pub extern "C" fn fge_param_get(param_id: u32, default_val: f32) -> f32 {
+    todo!()
+}
+
+#[no_mangle]
+pub extern "C" fn fge_poll_ai_events() -> u32 {
+    todo!()
+}
+
+#[no_mangle]
+#[allow(unused_variables)]
+pub extern "C" fn fge_get_ai_event(index: u32) -> FgeAiEvent {
+    todo!()
+}
+
+#[no_mangle]
+#[allow(unused_variables)]
+pub extern "C" fn fge_log_metric(metric_id: u32, value: f32) {
+    todo!()
 }
 
 /// Forces the linker to retain all 42 exported `fge_*` C-ABI symbols so `dlopen`-loaded
