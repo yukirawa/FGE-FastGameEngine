@@ -1,0 +1,12 @@
+[package]
+name = "fge-loader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fge-core.workspace = true
+fge-abi.workspace = true
+libloading.workspace = true
+thiserror.workspace = true
+log.workspace = true

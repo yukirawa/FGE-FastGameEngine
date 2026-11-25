@@ -105,6 +105,7 @@ fn cli_run_with_path_and_flags() {
             project_dir: PathBuf::from("./my_game"),
             frames: 60,
             offscreen: true,
+            no_hot_reload: false,
         })
     );
 }
@@ -118,6 +119,7 @@ fn cli_run_defaults() {
             project_dir: PathBuf::from("."),
             frames: 0,
             offscreen: false,
+            no_hot_reload: false,
         })
     );
 }

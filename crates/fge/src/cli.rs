@@ -70,6 +70,10 @@ pub struct RunArgs {
     /// Run offscreen without opening an OS window.
     #[arg(long, default_value_t = false)]
     pub offscreen: bool,
+
+    /// Disable C source polling and live hot-reload while running.
+    #[arg(long, default_value_t = false)]
+    pub no_hot_reload: bool,
 }
 
 /// Parses CLI arguments from an arbitrary iterator (test-friendly wrapper).

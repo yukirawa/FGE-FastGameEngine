@@ -384,3 +384,8 @@ pub extern "C" fn fge_mouse_wheel() -> FgeVec2 {
     })
     .unwrap_or_default()
 }
+
+/// Forces the linker to retain all exported `fge_*` C-ABI symbols.
+pub fn ensure_abi_symbols_linked() -> usize {
+    todo!()
+}

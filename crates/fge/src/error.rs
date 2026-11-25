@@ -9,6 +9,9 @@ pub enum AppError {
     #[error("render error: {0}")]
     Render(#[from] fge_render::error::RenderError),
 
+    #[error("loader error: {0}")]
+    Loader(#[from] fge_loader::error::LoaderError),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 

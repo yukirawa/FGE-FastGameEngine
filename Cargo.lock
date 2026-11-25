@@ -529,6 +529,7 @@ dependencies = [
  "env_logger",
  "fge-abi",
  "fge-core",
+ "fge-loader",
  "fge-render",
  "glam",
  "log",
@@ -557,6 +558,17 @@ dependencies = [
  "fastrand",
  "glam",
  "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fge-loader"
+version = "0.1.0"
+dependencies = [
+ "fge-abi",
+ "fge-core",
+ "libloading",
+ "log",
  "thiserror 2.0.21",
 ]
 

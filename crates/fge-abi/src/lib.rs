@@ -6,3 +6,8 @@ pub mod types;
 
 #[cfg(test)]
 mod tests;
+
+/// Prevents the linker from dead-stripping `extern "C"` C-ABI symbols when embedding `fge-abi`.
+pub fn ensure_abi_symbols_linked() -> usize {
+    crate::api::ensure_abi_symbols_linked()
+}

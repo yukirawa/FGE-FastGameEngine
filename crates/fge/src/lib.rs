@@ -14,3 +14,6 @@ mod tests;
 
 #[cfg(test)]
 mod phase2_tests;
+
+#[cfg(test)]
+mod phase3_tests;
