@@ -390,38 +390,40 @@ pub extern "C" fn fge_mouse_wheel() -> FgeVec2 {
 // ============================================================================
 
 #[no_mangle]
-#[allow(unused_variables)]
 pub extern "C" fn fge_param_set(param_id: u32, value: f32) {
-    todo!()
+    let _ = try_with_context_mut(|ctx| ctx.set_param(param_id, value));
 }
 
 #[no_mangle]
-#[allow(unused_variables)]
 pub extern "C" fn fge_param_get(param_id: u32, default_val: f32) -> f32 {
-    todo!()
+    try_with_context_mut(|ctx| ctx.get_param(param_id, default_val)).unwrap_or(default_val)
 }
 
 #[no_mangle]
 pub extern "C" fn fge_poll_ai_events() -> u32 {
-    todo!()
+    try_with_context_mut(|ctx| ctx.poll_ai_events()).unwrap_or(0)
 }
 
 #[no_mangle]
-#[allow(unused_variables)]
 pub extern "C" fn fge_get_ai_event(index: u32) -> FgeAiEvent {
-    todo!()
+    try_with_context_mut(|ctx| {
+        ctx.active_ai_events
+            .get(index as usize)
+            .copied()
+            .unwrap_or_default()
+    })
+    .unwrap_or_default()
 }
 
 #[no_mangle]
-#[allow(unused_variables)]
 pub extern "C" fn fge_log_metric(metric_id: u32, value: f32) {
-    todo!()
+    let _ = try_with_context_mut(|ctx| ctx.record_metric(metric_id, value));
 }
 
-/// Forces the linker to retain all 42 exported `fge_*` C-ABI symbols so `dlopen`-loaded
+/// Forces the linker to retain all 47 exported `fge_*` C-ABI symbols so `dlopen`-loaded
 /// game modules can resolve them against host binaries linked with `-Wl,--export-dynamic`.
 pub fn ensure_abi_symbols_linked() -> usize {
-    let symbols: [usize; 42] = [
+    let symbols: [usize; 47] = [
         // Lifecycle & Timing (6)
         fge_delta_time as *const () as usize,
         fge_frame_count as *const () as usize,
@@ -470,6 +472,12 @@ pub fn ensure_abi_symbols_linked() -> usize {
         fge_mouse_down as *const () as usize,
         fge_mouse_pos as *const () as usize,
         fge_mouse_wheel as *const () as usize,
+        // AI Bridge Mailbox & Telemetry (5)
+        fge_param_set as *const () as usize,
+        fge_param_get as *const () as usize,
+        fge_poll_ai_events as *const () as usize,
+        fge_get_ai_event as *const () as usize,
+        fge_log_metric as *const () as usize,
     ];
     std::hint::black_box(symbols).len()
 }

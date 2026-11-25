@@ -5,6 +5,11 @@ use std::{
 };
 
 use fge_abi::context::EngineContext;
+use fge_bridge::{
+    headless::{run_headless_test, HeadlessConfig},
+    server::BridgeServer,
+    snapshot::HeadlessTestReport,
+};
 use fge_core::{
     camera::Camera2D,
     input_core::FgeKey,
@@ -26,7 +31,7 @@ use winit::{
 };
 
 use crate::{
-    cli::{BenchArgs, Cli, Command, RunArgs},
+    cli::{BenchArgs, Cli, Command, RunArgs, TestArgs},
     config::{load_manifest_from_path, GameManifest, GameSection},
     error::AppError,
     input::InputState,
@@ -86,7 +91,31 @@ pub fn execute_cli(cli: Cli) -> Result<Option<BenchSummary>, AppError> {
             Ok(Some(summary))
         }
         Command::Run(args) => run_project(&args),
-        Command::Test(_args) => todo!(),
+        Command::Test(args) => {
+            let report = run_test_cmd(&args)?;
+            if args.dump_json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "fge test [{}]: frames={} entities={} collisions={} total_ms={:.3}",
+                    report.status,
+                    report.frames_executed,
+                    report
+                        .world_snapshot
+                        .as_ref()
+                        .map(|w| w.entity_count)
+                        .unwrap_or(0),
+                    report.collision_events_total,
+                    report.sim_timing.total_ms
+                );
+            }
+            if report.status != "ok" {
+                return Err(AppError::InvalidManifest {
+                    reason: format!("headless test status: {}", report.status),
+                });
+            }
+            Ok(None)
+        }
     }
 }
 
@@ -134,6 +163,17 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
     };
     let mut reloader = HotReloader::initial_build_and_load(plan, &mut ctx)?;
 
+    let mut bridge = if let Some(addr) = args.bridge.as_deref() {
+        let server = BridgeServer::bind(addr)?;
+        match server.local_addr() {
+            Ok(local_addr) => log::info!("AI Bridge listening on {}", local_addr),
+            Err(_) => log::info!("AI Bridge listening on {}", addr),
+        }
+        Some(server)
+    } else {
+        None
+    };
+
     if args.offscreen {
         let mut renderer = GpuRenderer::new_offscreen(
             game.width,
@@ -170,6 +210,10 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
                             );
                         }
                     }
+                }
+
+                if let Some(b) = bridge.as_mut() {
+                    b.poll_frame(&mut ctx);
                 }
 
                 reloader.step_frame(&mut ctx, dt)?;
@@ -220,6 +264,7 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
         renderer: None,
         ctx,
         reloader,
+        bridge,
         tracker: FrameStatsTracker::with_capacity(initial_cap),
         last_stats: FrameRenderStats::default(),
         last_entity_count: initial_entity_count,
@@ -514,6 +559,7 @@ struct WindowedGameApp<'a> {
     renderer: Option<GpuRenderer>,
     ctx: EngineContext,
     reloader: HotReloader,
+    bridge: Option<BridgeServer>,
     tracker: FrameStatsTracker,
     last_stats: FrameRenderStats,
     last_entity_count: usize,
@@ -646,6 +692,10 @@ impl ApplicationHandler for WindowedGameApp<'_> {
                 }
             }
 
+            if let Some(b) = self.bridge.as_mut() {
+                b.poll_frame(&mut self.ctx);
+            }
+
             if let Err(err) = self.reloader.step_frame(&mut self.ctx, dt) {
                 self.fatal_error = Some(AppError::Loader(err));
                 event_loop.exit();
@@ -686,8 +736,20 @@ impl ApplicationHandler for WindowedGameApp<'_> {
 }
 
 /// Executes a `game.toml` project headlessly via `fge-bridge` and returns a structured report.
-pub fn run_test_cmd(
-    _args: &crate::cli::TestArgs,
-) -> Result<fge_bridge::snapshot::HeadlessTestReport, crate::error::AppError> {
-    todo!()
+pub fn run_test_cmd(args: &TestArgs) -> Result<HeadlessTestReport, AppError> {
+    let GameManifest { game, build } = load_manifest_from_path(&args.project_dir)?;
+    let project_dir = resolve_project_dir(&args.project_dir);
+    let cfg = HeadlessConfig {
+        project_dir,
+        project_title: game.title,
+        width: game.width,
+        height: game.height,
+        entry: build.entry,
+        sources: build.sources,
+        frames: args.frames,
+        seed: args.seed,
+        dt: args.dt,
+        snapshot_entity_limit: None,
+    };
+    Ok(run_headless_test(&cfg))
 }

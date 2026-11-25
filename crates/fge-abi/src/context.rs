@@ -91,28 +91,43 @@ impl EngineContext {
         })
     }
 
-    #[allow(unused_variables)]
+    /// Inserts or updates a numeric parameter by `id`.
     pub fn set_param(&mut self, id: u32, value: f32) {
-        todo!()
+        if let Some((_, existing)) = self.params.iter_mut().find(|(k, _)| *k == id) {
+            *existing = value;
+        } else {
+            self.params.push((id, value));
+        }
     }
 
-    #[allow(unused_variables)]
+    /// Returns the numeric parameter for `id`, or `default_val` if unset.
     pub fn get_param(&self, id: u32, default_val: f32) -> f32 {
-        todo!()
+        self.params
+            .iter()
+            .find(|(k, _)| *k == id)
+            .map(|(_, v)| *v)
+            .unwrap_or(default_val)
     }
 
-    #[allow(unused_variables)]
+    /// Appends an incoming AI event into the pending queue for the next poll.
     pub fn push_ai_event(&mut self, event: FgeAiEvent) {
-        todo!()
+        self.pending_ai_events.push(event);
     }
 
+    /// Moves all pending AI events into the active per-frame slice and returns the event count.
     pub fn poll_ai_events(&mut self) -> u32 {
-        todo!()
+        self.active_ai_events.clear();
+        self.active_ai_events.append(&mut self.pending_ai_events);
+        self.active_ai_events.len().min(u32::MAX as usize) as u32
     }
 
-    #[allow(unused_variables)]
+    /// Records or updates a numeric telemetry metric by `id`.
     pub fn record_metric(&mut self, id: u32, value: f32) {
-        todo!()
+        if let Some((_, existing)) = self.metrics.iter_mut().find(|(k, _)| *k == id) {
+            *existing = value;
+        } else {
+            self.metrics.push((id, value));
+        }
     }
 
     /// Advances frame counters, runs `callback` while `self` is bound as the active C-ABI

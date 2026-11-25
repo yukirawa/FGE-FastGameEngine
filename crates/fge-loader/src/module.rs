@@ -30,7 +30,7 @@ impl LoadedGameModule {
             // 1. `libloading::Library::new` invokes platform dynamic loading (`dlopen`), which may
             //    execute shared-object initialization routines. Callers only pass game `.so` artifacts
             //    compiled against `include/fge.h` for the host target.
-            // 2. `fge_abi::ensure_abi_symbols_linked()` was invoked immediately above so all 42
+            // 2. `fge_abi::ensure_abi_symbols_linked()` was invoked immediately above so all 47
             //    `fge_*` C-ABI host symbols are retained in the host binary's dynamic symbol table
             //    (`-Wl,--export-dynamic`) for symbol resolution by the loaded shared library.
             let library = unsafe { libloading::Library::new(&so_path) }?;
