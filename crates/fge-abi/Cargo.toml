@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 fge-core.workspace = true
+fge-audio.workspace = true
 glam.workspace = true
 fastrand.workspace = true
 serde.workspace = true

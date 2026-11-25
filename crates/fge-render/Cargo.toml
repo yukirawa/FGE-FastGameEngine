@@ -12,3 +12,5 @@ bytemuck.workspace = true
 pollster.workspace = true
 thiserror.workspace = true
 log.workspace = true
+ab_glyph.workspace = true
+png.workspace = true

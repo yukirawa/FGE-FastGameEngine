@@ -1,0 +1,11 @@
+[package]
+name = "fge-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fge-core.workspace = true
+cpal.workspace = true
+thiserror.workspace = true
+log.workspace = true

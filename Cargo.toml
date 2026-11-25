@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/fge-core",
+    "crates/fge-audio",
     "crates/fge-abi",
     "crates/fge-loader",
     "crates/fge-bridge",
@@ -16,10 +17,14 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 fge-core = { path = "crates/fge-core" }
+fge-audio = { path = "crates/fge-audio" }
 fge-abi = { path = "crates/fge-abi" }
 fge-loader = { path = "crates/fge-loader" }
 fge-bridge = { path = "crates/fge-bridge" }
 fge-render = { path = "crates/fge-render" }
+cpal = "0.15.3"
+ab_glyph = "0.2.32"
+png = "0.18.1"
 wgpu = "30.0.1"
 winit = "0.30.13"
 glam = "0.33.6"

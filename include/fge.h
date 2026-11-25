@@ -65,6 +65,26 @@ typedef struct FgeAiEvent {
     float arg1;
 } FgeAiEvent;
 
+typedef struct FgeSound {
+    uint32_t index;
+    uint32_t generation;
+} FgeSound;
+
+typedef struct FgeEmitter {
+    uint32_t index;
+    uint32_t generation;
+} FgeEmitter;
+
+typedef struct FgeTexture {
+    uint32_t index;
+    uint32_t generation;
+} FgeTexture;
+
+typedef struct FgeTextBuf {
+    uint8_t bytes[120];
+    uint32_t len;
+} FgeTextBuf;
+
 /* ==========================================================================
  * 2. Entity Flags & Key Codes
  * ========================================================================== */
@@ -118,6 +138,32 @@ typedef enum FgeMouseButton {
     FGE_MOUSE_MIDDLE = 2
 } FgeMouseButton;
 
+typedef enum FgeSynthPreset {
+    FGE_SFX_SLASH     = 0,
+    FGE_SFX_HIT       = 1,
+    FGE_SFX_EXPLOSION = 2,
+    FGE_SFX_PICKUP    = 3,
+    FGE_SFX_BLIP      = 4,
+    FGE_SFX_CONFIRM   = 5,
+    FGE_SFX_HEAL      = 6,
+    FGE_SFX_LEVEL_UP  = 7
+} FgeSynthPreset;
+
+typedef enum FgeBgmPreset {
+    FGE_BGM_NONE    = 0,
+    FGE_BGM_VILLAGE = 1,
+    FGE_BGM_FIELD   = 2,
+    FGE_BGM_BATTLE  = 3,
+    FGE_BGM_BOSS    = 4
+} FgeBgmPreset;
+
+typedef enum FgeWaveform {
+    FGE_WAVE_SQUARE   = 0,
+    FGE_WAVE_TRIANGLE = 1,
+    FGE_WAVE_SAW      = 2,
+    FGE_WAVE_NOISE    = 3
+} FgeWaveform;
+
 /* ==========================================================================
  * 3. Inline Value Constructors
  * ========================================================================== */
@@ -135,6 +181,18 @@ static inline FgeVec2 fge_vec2(float x, float y) {
 static inline FgeColor fge_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     FgeColor c = { r, g, b, a };
     return c;
+}
+
+static inline FgeTextBuf fge_str(const char *utf8_literal) {
+    FgeTextBuf buf = { { 0 }, 0u };
+    if (!utf8_literal) {
+        return buf;
+    }
+    while (buf.len < 120u && utf8_literal[buf.len] != '\0') {
+        buf.bytes[buf.len] = (uint8_t)utf8_literal[buf.len];
+        buf.len++;
+    }
+    return buf;
 }
 
 /* ==========================================================================
@@ -201,6 +259,35 @@ float      fge_param_get(uint32_t param_id, float default_val);
 uint32_t   fge_poll_ai_events(void);
 FgeAiEvent fge_get_ai_event(uint32_t index);
 void       fge_log_metric(uint32_t metric_id, float value);
+
+/* Audio (WAV, Procedural Chiptune SFX & RPG BGM) */
+void     fge_audio_set_master_volume(float volume);
+void     fge_audio_play_sfx(uint32_t preset, float volume, float pitch_scale);
+void     fge_audio_play_tone(uint32_t waveform, float freq_start_hz, float freq_end_hz, float duration_sec, float volume);
+FgeSound fge_sound_load_wav(FgeTextBuf relative_path);
+bool     fge_sound_play(FgeSound sound, float volume);
+void     fge_bgm_play_preset(uint32_t bgm_preset, float volume);
+void     fge_bgm_stop(void);
+
+/* Performance, Native TTL & Bulk Radial Emitters */
+bool       fge_set_ttl(FgeEntity entity, float ttl_seconds);
+FgeEmitter fge_emitter_create_radial(float x, float y, float rate_per_sec, uint32_t count_per_burst, float speed, float bullet_ttl, float radius, uint32_t layer_mask, FgeColor color);
+bool       fge_emitter_set_position(FgeEmitter emitter, float x, float y);
+bool       fge_emitter_set_spin(FgeEmitter emitter, float base_angle_rad, float angular_vel_rad);
+bool       fge_emitter_set_active(FgeEmitter emitter, bool active);
+bool       fge_emitter_destroy(FgeEmitter emitter);
+
+/* Textures (PNG Atlas) */
+FgeTexture fge_texture_load_png(FgeTextBuf relative_path);
+bool       fge_set_texture(FgeEntity entity, FgeTexture texture);
+
+/* Immediate-Mode Screen & World Text/UI */
+void fge_ui_panel(float x, float y, float w, float h, FgeColor bg_color, FgeColor border_color, float border_px);
+void fge_ui_bar(float x, float y, float w, float h, float ratio, FgeColor fill_color, FgeColor bg_color);
+void fge_ui_text(float x, float y, float font_size, FgeColor color, FgeTextBuf text);
+void fge_ui_number(float x, float y, float font_size, int64_t value, FgeColor color);
+void fge_ui_dialog_box(float x, float y, float w, float h, FgeTextBuf speaker, FgeTextBuf message, uint32_t visible_chars);
+void fge_world_text(float world_x, float world_y, float font_size, FgeColor color, FgeTextBuf text);
 
 /* Game Module Entrypoints (Implemented by user C code) */
 void fge_init(void);
