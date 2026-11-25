@@ -1,7 +1,19 @@
-use fge_core::{handle::EntityId, spatial::CollisionPair};
+use fge_audio::engine::SoundId;
+use fge_core::{emitter::EmitterId, handle::EntityId, spatial::CollisionPair};
+
+pub use fge_core::ui::FgeTextBuf;
 
 /// C-ABI 64-bit generational handle (`typedef struct FgeEntity` in `fge.h`).
 pub type FgeEntity = EntityId;
+
+/// C-ABI 64-bit generational sound handle (`typedef struct FgeSound` in `fge.h`).
+pub type FgeSound = SoundId;
+
+/// C-ABI 64-bit generational emitter handle (`typedef struct FgeEmitter` in `fge.h`).
+pub type FgeEmitter = EmitterId;
+
+/// C-ABI 64-bit generational texture handle (`typedef struct FgeTexture` in `fge.h`).
+pub type FgeTexture = EntityId;
 
 /// C-ABI collision pair (`typedef struct FgeCollisionPair` in `fge.h`).
 pub type FgeCollisionPair = CollisionPair;
@@ -51,6 +63,10 @@ pub struct FgeAiEvent {
 }
 
 const _: () = assert!(core::mem::size_of::<FgeEntity>() == 8);
+const _: () = assert!(core::mem::size_of::<FgeSound>() == 8);
+const _: () = assert!(core::mem::size_of::<FgeEmitter>() == 8);
+const _: () = assert!(core::mem::size_of::<FgeTexture>() == 8);
+const _: () = assert!(core::mem::size_of::<FgeTextBuf>() == 124);
 const _: () = assert!(core::mem::size_of::<FgeVec2>() == 8);
 const _: () = assert!(core::mem::size_of::<FgeColor>() == 4);
 const _: () = assert!(core::mem::size_of::<FgeUvRect>() == 8);

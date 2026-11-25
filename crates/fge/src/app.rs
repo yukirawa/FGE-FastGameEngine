@@ -36,7 +36,7 @@ use winit::{
 
 use crate::{
     cli::{BenchArgs, Cli, Command, RunArgs, TestArgs},
-    config::{load_manifest_from_path, GameManifest, GameSection, YSortModeConfig},
+    config::{load_manifest_from_path, GameManifest, GameSection, UiSection, YSortModeConfig},
     error::AppError,
     input::InputState,
     keymap::apply_window_event_to_core_input,
@@ -140,6 +140,43 @@ fn resolve_project_dir(path: &Path) -> PathBuf {
     }
 }
 
+fn configure_renderer_ui_font(renderer: &mut GpuRenderer, project_dir: &Path, font: Option<&str>) {
+    let Some(font_rel) = font else {
+        return;
+    };
+    let font_path = {
+        let p = Path::new(font_rel);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            project_dir.join(p)
+        }
+    };
+    if let Err(err) = renderer.load_font_file(&font_path) {
+        log::warn!(
+            "Failed to load custom [ui].font {:?} (falling back to default font): {}",
+            font_path,
+            err
+        );
+    }
+}
+
+fn sync_pending_textures(ctx: &mut EngineContext, renderer: &mut GpuRenderer) {
+    for (abi_tex_id, path) in ctx.take_pending_textures() {
+        match renderer.load_png_texture(&path) {
+            Ok(gpu_tex_id) => {
+                if let Some(uv) = renderer.get_texture_uv(gpu_tex_id) {
+                    ctx.record_resolved_texture_uv(abi_tex_id, uv);
+                }
+            }
+            Err(err) => {
+                log::warn!("Failed to upload PNG texture {:?}: {}", path, err);
+            }
+        }
+    }
+    ctx.apply_pending_entity_textures();
+}
+
 /// Loads `game.toml`, compiles and dynamically loads the C11 game module via `fge-loader`,
 /// and runs the engine loop (either offscreen or windowed via `winit`) with optional hot-reload.
 pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
@@ -148,6 +185,8 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
         build,
         spatial,
         render,
+        audio,
+        ui,
     } = load_manifest_from_path(&args.project_dir)?;
     let project_dir = resolve_project_dir(&args.project_dir);
     let depth_sort_mode = match render.y_sort_mode {
@@ -174,6 +213,17 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
         spatial.cell_size,
         spatial.buckets,
     )?;
+    ctx.set_project_dir(&project_dir);
+    if !args.offscreen && !audio.muted {
+        ctx.enable_live_audio(audio.master_volume);
+    } else {
+        ctx.audio.set_master_volume(if audio.muted {
+            0.0
+        } else {
+            audio.master_volume
+        });
+    }
+
     let plan = CBuildPlan {
         project_dir,
         entry: build.entry,
@@ -208,6 +258,8 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
             ctx.world.len().max(INITIAL_WORLD_RENDER_CAPACITY),
         )?;
         renderer.set_depth_sort_mode(depth_sort_mode);
+        configure_renderer_ui_font(&mut renderer, &ctx.project_dir, ui.font.as_deref());
+        sync_pending_textures(&mut ctx, &mut renderer);
         let target_frames = if args.frames == 0 {
             DEFAULT_GAME_OFFSCREEN_FRAMES
         } else {
@@ -245,8 +297,15 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
                 }
 
                 reloader.step_frame(&mut ctx, dt)?;
+                sync_pending_textures(&mut ctx, &mut renderer);
                 last_entity_count = ctx.world.len();
-                last_stats = renderer.render_world(&ctx.camera, &ctx.world, true, CLEAR_COLOR)?;
+                last_stats = renderer.render_world_and_ui(
+                    &ctx.camera,
+                    &ctx.world,
+                    &ctx.ui,
+                    true,
+                    CLEAR_COLOR,
+                )?;
 
                 let frame_ms = frame_start.elapsed().as_secs_f64() * 1000.0;
                 tracker.record_frame_ms(frame_ms);
@@ -287,6 +346,7 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
     let mut app = WindowedGameApp {
         args,
         game: &game,
+        ui: &ui,
         depth_sort_mode,
         display_handle: Some(display_handle),
         window: None,
@@ -583,6 +643,7 @@ impl ApplicationHandler for WindowedBenchApp<'_> {
 struct WindowedGameApp<'a> {
     args: &'a RunArgs,
     game: &'a GameSection,
+    ui: &'a UiSection,
     depth_sort_mode: DepthSortMode,
     display_handle: Option<OwnedDisplayHandle>,
     window: Option<Arc<Window>>,
@@ -643,6 +704,12 @@ impl ApplicationHandler for WindowedGameApp<'_> {
         ) {
             Ok(mut renderer) => {
                 renderer.set_depth_sort_mode(self.depth_sort_mode);
+                configure_renderer_ui_font(
+                    &mut renderer,
+                    &self.ctx.project_dir,
+                    self.ui.font.as_deref(),
+                );
+                sync_pending_textures(&mut self.ctx, &mut renderer);
                 let _ = self
                     .ctx
                     .camera
@@ -733,10 +800,17 @@ impl ApplicationHandler for WindowedGameApp<'_> {
                 return;
             }
 
+            sync_pending_textures(&mut self.ctx, renderer);
             self.frame_counter = self.frame_counter.saturating_add(1);
             self.last_entity_count = self.ctx.world.len();
 
-            match renderer.render_world(&self.ctx.camera, &self.ctx.world, true, CLEAR_COLOR) {
+            match renderer.render_world_and_ui(
+                &self.ctx.camera,
+                &self.ctx.world,
+                &self.ctx.ui,
+                true,
+                CLEAR_COLOR,
+            ) {
                 Ok(stats) => {
                     if !stats.skipped {
                         let frame_ms = frame_start.elapsed().as_secs_f64() * 1000.0;

@@ -10,8 +10,8 @@ use winit::{
 use crate::{
     cli::{parse_cli_from, BenchArgs, Command, RunArgs},
     config::{
-        load_manifest_from_path, parse_manifest_str, BuildSection, GameManifest, GameSection,
-        RenderSection, SpatialSection,
+        load_manifest_from_path, parse_manifest_str, AudioSection, BuildSection, GameManifest,
+        GameSection, RenderSection, SpatialSection, UiSection,
     },
     error::AppError,
     input::InputState,
@@ -174,6 +174,8 @@ sources = ["src/game.c", "src/physics.c"]
             },
             spatial: SpatialSection::default(),
             render: RenderSection::default(),
+            audio: AudioSection::default(),
+            ui: UiSection::default(),
         }
     );
 }
@@ -249,6 +251,8 @@ fn manifest_validate_rejects_invalid_fields() {
         },
         spatial: SpatialSection::default(),
         render: RenderSection::default(),
+        audio: AudioSection::default(),
+        ui: UiSection::default(),
     };
     assert!(base.validate().is_ok());
 

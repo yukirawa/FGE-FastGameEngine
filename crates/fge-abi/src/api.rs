@@ -6,8 +6,10 @@
 //! - Calls made outside `with_active_context` or with stale handles / out-of-bounds indices
 //!   return safe default values without panicking.
 
+use fge_audio::synth::{BgmPreset, SfxPreset, Waveform};
 use fge_core::{
     camera::Camera2D,
+    emitter::EmitterSpec,
     handle::EntityId,
     input_core::{FgeKey, FgeMouseButton},
     spatial::CollisionPair,
@@ -16,7 +18,10 @@ use glam::Vec2;
 
 use crate::{
     context::try_with_context_mut,
-    types::{FgeAiEvent, FgeCamera, FgeCollisionPair, FgeColor, FgeEntity, FgeUvRect, FgeVec2},
+    types::{
+        FgeAiEvent, FgeCamera, FgeCollisionPair, FgeColor, FgeEmitter, FgeEntity, FgeSound,
+        FgeTextBuf, FgeTexture, FgeUvRect, FgeVec2,
+    },
 };
 
 const INVALID_COLLISION_PAIR: FgeCollisionPair = CollisionPair {
@@ -420,10 +425,292 @@ pub extern "C" fn fge_log_metric(metric_id: u32, value: f32) {
     let _ = try_with_context_mut(|ctx| ctx.record_metric(metric_id, value));
 }
 
-/// Forces the linker to retain all 47 exported `fge_*` C-ABI symbols so `dlopen`-loaded
+// ============================================================================
+// Audio (WAV, Procedural Chiptune SFX & RPG BGM)
+// ============================================================================
+
+#[no_mangle]
+pub extern "C" fn fge_audio_set_master_volume(volume: f32) {
+    let _ = try_with_context_mut(|ctx| ctx.audio.set_master_volume(volume));
+}
+
+#[no_mangle]
+pub extern "C" fn fge_audio_play_sfx(preset: u32, volume: f32, pitch_scale: f32) {
+    let Some(preset) = SfxPreset::from_u32(preset) else {
+        return;
+    };
+    let _ = try_with_context_mut(|ctx| ctx.audio.play_sfx(preset, volume, pitch_scale));
+}
+
+#[no_mangle]
+pub extern "C" fn fge_audio_play_tone(
+    waveform: u32,
+    freq_start_hz: f32,
+    freq_end_hz: f32,
+    duration_sec: f32,
+    volume: f32,
+) {
+    let Some(waveform) = Waveform::from_u32(waveform) else {
+        return;
+    };
+    let _ = try_with_context_mut(|ctx| {
+        ctx.audio
+            .play_tone(waveform, freq_start_hz, freq_end_hz, duration_sec, volume)
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn fge_sound_load_wav(relative_path: FgeTextBuf) -> FgeSound {
+    try_with_context_mut(|ctx| {
+        let rel = relative_path.as_str();
+        let trimmed = rel.trim();
+        if trimmed.is_empty() {
+            return EntityId::INVALID;
+        }
+        let full_path = ctx.resolve_asset_path(trimmed);
+        ctx.audio
+            .load_wav_file(&full_path)
+            .unwrap_or(EntityId::INVALID)
+    })
+    .unwrap_or(EntityId::INVALID)
+}
+
+#[no_mangle]
+pub extern "C" fn fge_sound_play(sound: FgeSound, volume: f32) -> bool {
+    try_with_context_mut(|ctx| ctx.audio.play_sound(sound, volume)).unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn fge_bgm_play_preset(bgm_preset: u32, volume: f32) {
+    let Some(preset) = BgmPreset::from_u32(bgm_preset) else {
+        return;
+    };
+    let _ = try_with_context_mut(|ctx| ctx.audio.play_bgm_preset(preset, volume));
+}
+
+#[no_mangle]
+pub extern "C" fn fge_bgm_stop() {
+    let _ = try_with_context_mut(|ctx| ctx.audio.stop_bgm());
+}
+
+// ============================================================================
+// Performance, Native TTL & Bulk Radial Emitters
+// ============================================================================
+
+#[no_mangle]
+pub extern "C" fn fge_set_ttl(entity: FgeEntity, ttl_seconds: f32) -> bool {
+    try_with_context_mut(|ctx| ctx.world.set_ttl(entity, ttl_seconds)).unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn fge_emitter_create_radial(
+    x: f32,
+    y: f32,
+    rate_per_sec: f32,
+    count_per_burst: u32,
+    speed: f32,
+    bullet_ttl: f32,
+    radius: f32,
+    layer_mask: u32,
+    color: FgeColor,
+) -> FgeEmitter {
+    try_with_context_mut(|ctx| {
+        let diameter = if radius.is_finite() && radius > 0.0 {
+            radius * 2.0
+        } else {
+            8.0
+        };
+        let spec = EmitterSpec {
+            pos: [x, y],
+            rate_per_sec,
+            count_per_burst,
+            speed,
+            bullet_ttl,
+            collider_radius: radius,
+            layer_mask,
+            size: [diameter, diameter],
+            color_rgba: [color.r, color.g, color.b, color.a],
+            base_angle_rad: 0.0,
+            angular_vel_rad: 0.0,
+            active: true,
+        };
+        ctx.emitters.create_radial(spec)
+    })
+    .unwrap_or(EntityId::INVALID)
+}
+
+#[no_mangle]
+pub extern "C" fn fge_emitter_set_position(emitter: FgeEmitter, x: f32, y: f32) -> bool {
+    try_with_context_mut(|ctx| ctx.emitters.set_position(emitter, x, y)).unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn fge_emitter_set_spin(
+    emitter: FgeEmitter,
+    base_angle_rad: f32,
+    angular_vel_rad: f32,
+) -> bool {
+    try_with_context_mut(|ctx| {
+        ctx.emitters
+            .set_spin(emitter, base_angle_rad, angular_vel_rad)
+    })
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn fge_emitter_set_active(emitter: FgeEmitter, active: bool) -> bool {
+    try_with_context_mut(|ctx| ctx.emitters.set_active(emitter, active)).unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn fge_emitter_destroy(emitter: FgeEmitter) -> bool {
+    try_with_context_mut(|ctx| ctx.emitters.destroy(emitter)).unwrap_or(false)
+}
+
+// ============================================================================
+// Textures (PNG Atlas)
+// ============================================================================
+
+#[no_mangle]
+pub extern "C" fn fge_texture_load_png(relative_path: FgeTextBuf) -> FgeTexture {
+    try_with_context_mut(|ctx| {
+        let rel = relative_path.as_str();
+        ctx.queue_texture_load_png(rel.as_ref())
+    })
+    .unwrap_or(EntityId::INVALID)
+}
+
+#[no_mangle]
+pub extern "C" fn fge_set_texture(entity: FgeEntity, texture: FgeTexture) -> bool {
+    try_with_context_mut(|ctx| ctx.bind_entity_texture(entity, texture)).unwrap_or(false)
+}
+
+// ============================================================================
+// Immediate-Mode Screen & World Text/UI
+// ============================================================================
+
+#[no_mangle]
+pub extern "C" fn fge_ui_panel(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    bg_color: FgeColor,
+    border_color: FgeColor,
+    border_px: f32,
+) {
+    let _ = try_with_context_mut(|ctx| {
+        ctx.ui.push_panel(
+            x,
+            y,
+            w,
+            h,
+            [bg_color.r, bg_color.g, bg_color.b, bg_color.a],
+            [
+                border_color.r,
+                border_color.g,
+                border_color.b,
+                border_color.a,
+            ],
+            border_px,
+        );
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn fge_ui_bar(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    ratio: f32,
+    fill_color: FgeColor,
+    bg_color: FgeColor,
+) {
+    let _ = try_with_context_mut(|ctx| {
+        ctx.ui.push_bar(
+            x,
+            y,
+            w,
+            h,
+            ratio,
+            [fill_color.r, fill_color.g, fill_color.b, fill_color.a],
+            [bg_color.r, bg_color.g, bg_color.b, bg_color.a],
+        );
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn fge_ui_text(
+    x: f32,
+    y: f32,
+    font_size: f32,
+    color: FgeColor,
+    text: FgeTextBuf,
+) {
+    let _ = try_with_context_mut(|ctx| {
+        let s = text.as_str();
+        ctx.ui
+            .push_screen_text(x, y, font_size, [color.r, color.g, color.b, color.a], s.as_ref());
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn fge_ui_number(
+    x: f32,
+    y: f32,
+    font_size: f32,
+    value: i64,
+    color: FgeColor,
+) {
+    let _ = try_with_context_mut(|ctx| {
+        ctx.ui
+            .push_number(x, y, font_size, value, [color.r, color.g, color.b, color.a]);
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn fge_ui_dialog_box(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    speaker: FgeTextBuf,
+    message: FgeTextBuf,
+    visible_chars: u32,
+) {
+    let _ = try_with_context_mut(|ctx| {
+        let spk = speaker.as_str();
+        let msg = message.as_str();
+        ctx.ui
+            .push_dialog_box(x, y, w, h, spk.as_ref(), msg.as_ref(), visible_chars);
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn fge_world_text(
+    world_x: f32,
+    world_y: f32,
+    font_size: f32,
+    color: FgeColor,
+    text: FgeTextBuf,
+) {
+    let _ = try_with_context_mut(|ctx| {
+        let s = text.as_str();
+        ctx.ui.push_world_text(
+            world_x,
+            world_y,
+            font_size,
+            [color.r, color.g, color.b, color.a],
+            s.as_ref(),
+        );
+    });
+}
+
+/// Forces the linker to retain all 68 exported `fge_*` C-ABI symbols so `dlopen`-loaded
 /// game modules can resolve them against host binaries linked with `-Wl,--export-dynamic`.
 pub fn ensure_abi_symbols_linked() -> usize {
-    let symbols: [usize; 47] = [
+    let symbols: [usize; 68] = [
         // Lifecycle & Timing (6)
         fge_delta_time as *const () as usize,
         fge_frame_count as *const () as usize,
@@ -478,6 +765,31 @@ pub fn ensure_abi_symbols_linked() -> usize {
         fge_poll_ai_events as *const () as usize,
         fge_get_ai_event as *const () as usize,
         fge_log_metric as *const () as usize,
+        // Audio (7)
+        fge_audio_set_master_volume as *const () as usize,
+        fge_audio_play_sfx as *const () as usize,
+        fge_audio_play_tone as *const () as usize,
+        fge_sound_load_wav as *const () as usize,
+        fge_sound_play as *const () as usize,
+        fge_bgm_play_preset as *const () as usize,
+        fge_bgm_stop as *const () as usize,
+        // Performance, Native TTL & Bulk Radial Emitters (6)
+        fge_set_ttl as *const () as usize,
+        fge_emitter_create_radial as *const () as usize,
+        fge_emitter_set_position as *const () as usize,
+        fge_emitter_set_spin as *const () as usize,
+        fge_emitter_set_active as *const () as usize,
+        fge_emitter_destroy as *const () as usize,
+        // Textures (2)
+        fge_texture_load_png as *const () as usize,
+        fge_set_texture as *const () as usize,
+        // Immediate-Mode Screen & World Text/UI (6)
+        fge_ui_panel as *const () as usize,
+        fge_ui_bar as *const () as usize,
+        fge_ui_text as *const () as usize,
+        fge_ui_number as *const () as usize,
+        fge_ui_dialog_box as *const () as usize,
+        fge_world_text as *const () as usize,
     ];
     std::hint::black_box(symbols).len()
 }

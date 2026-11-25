@@ -41,7 +41,15 @@ fn vs_main(
 
     var out: VertexOutput;
     out.clip_position = camera * vec4<f32>(world_pos, 0.0, 1.0);
-    out.uv = mix(instance.uv_rect.xy, instance.uv_rect.zw, vec2<f32>(u_bit, v_bit));
+    let is_full_uv = instance.uv_rect.x == 0.0
+        && instance.uv_rect.y == 0.0
+        && instance.uv_rect.z > 0.999
+        && instance.uv_rect.w > 0.999;
+    if (is_full_uv) {
+        out.uv = vec2<f32>(4.0 / 2048.0, 4.0 / 2048.0);
+    } else {
+        out.uv = mix(instance.uv_rect.xy, instance.uv_rect.zw, vec2<f32>(u_bit, v_bit));
+    }
     out.color = instance.color;
     return out;
 }

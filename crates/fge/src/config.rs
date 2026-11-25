@@ -14,6 +14,10 @@ pub struct GameManifest {
     pub spatial: SpatialSection,
     #[serde(default)]
     pub render: RenderSection,
+    #[serde(default)]
+    pub audio: AudioSection,
+    #[serde(default)]
+    pub ui: UiSection,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -78,6 +82,33 @@ pub enum YSortModeConfig {
 pub struct RenderSection {
     #[serde(default)]
     pub y_sort_mode: YSortModeConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioSection {
+    #[serde(default = "default_master_volume")]
+    pub master_volume: f32,
+    #[serde(default)]
+    pub muted: bool,
+}
+
+impl Default for AudioSection {
+    fn default() -> Self {
+        Self {
+            master_volume: default_master_volume(),
+            muted: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSection {
+    #[serde(default)]
+    pub font: Option<String>,
+}
+
+const fn default_master_volume() -> f32 {
+    0.8
 }
 
 const fn default_width() -> u32 {
@@ -152,6 +183,18 @@ impl GameManifest {
             return Err(AppError::InvalidManifest {
                 reason: String::from("spatial.buckets must be a positive power of two"),
             });
+        }
+        if !(self.audio.master_volume.is_finite() && self.audio.master_volume >= 0.0) {
+            return Err(AppError::InvalidManifest {
+                reason: String::from("audio.master_volume must be finite and non-negative"),
+            });
+        }
+        if let Some(ref font) = self.ui.font {
+            if font.trim().is_empty() {
+                return Err(AppError::InvalidManifest {
+                    reason: String::from("ui.font must not be empty when specified"),
+                });
+            }
         }
         Ok(())
     }

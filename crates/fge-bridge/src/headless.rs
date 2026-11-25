@@ -100,6 +100,7 @@ pub fn run_headless_test_with_options(
             return report;
         }
     };
+    ctx.set_project_dir(&cfg.project_dir);
 
     let plan = CBuildPlan {
         project_dir: cfg.project_dir.clone(),

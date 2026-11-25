@@ -1,20 +1,26 @@
 use std::cell::Cell;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 
 use fastrand::Rng;
+use fge_audio::engine::AudioEngine;
 use fge_core::{
     camera::Camera2D,
+    emitter::EmitterWorld,
     error::CoreError,
-    handle::EntityId,
+    handle::{EntityId, GenerationalArena},
     input_core::CoreInputState,
     spatial::{CollisionPair, SpatialHashGrid},
+    ui::UiCommandQueue,
     world::EntityWorld,
 };
 
-use crate::types::FgeAiEvent;
+use crate::types::{FgeAiEvent, FgeTexture};
 
 const DEFAULT_SPATIAL_CELL_SIZE: f32 = 64.0;
 const DEFAULT_SPATIAL_BUCKETS: usize = 4096;
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 
 thread_local! {
     /// Thread-local pointer to the currently active `EngineContext` for synchronous C-ABI calls.
@@ -49,6 +55,14 @@ impl Drop for BorrowGuard {
 /// as well as headless tests and the Phase 4 AI Bridge.
 pub struct EngineContext {
     pub world: EntityWorld,
+    pub emitters: EmitterWorld,
+    pub ui: UiCommandQueue,
+    pub audio: AudioEngine,
+    pub project_dir: PathBuf,
+    pub texture_arena: GenerationalArena,
+    pub texture_uvs: Vec<Option<[u16; 4]>>,
+    pub pending_textures: Vec<(FgeTexture, PathBuf)>,
+    pub entity_textures: Vec<(EntityId, FgeTexture)>,
     pub camera: Camera2D,
     pub spatial: SpatialHashGrid,
     pub input: CoreInputState,
@@ -90,6 +104,14 @@ impl EngineContext {
         let spatial = SpatialHashGrid::new(cell_size, buckets)?;
         Ok(Self {
             world: EntityWorld::new(),
+            emitters: EmitterWorld::new(),
+            ui: UiCommandQueue::new(),
+            audio: AudioEngine::new_headless(),
+            project_dir: PathBuf::from("."),
+            texture_arena: GenerationalArena::default(),
+            texture_uvs: Vec::new(),
+            pending_textures: Vec::new(),
+            entity_textures: Vec::new(),
             camera,
             spatial,
             input: CoreInputState::new(),
@@ -104,6 +126,100 @@ impl EngineContext {
             active_ai_events: Vec::new(),
             metrics: Vec::new(),
         })
+    }
+
+    /// Sets the project root directory used to resolve relative asset paths (WAVs, PNGs).
+    pub fn set_project_dir(&mut self, dir: impl Into<PathBuf>) {
+        self.project_dir = dir.into();
+    }
+
+    /// Resolves `relative_path` against `self.project_dir` (returning it directly if already absolute).
+    pub fn resolve_asset_path(&self, relative_path: &str) -> PathBuf {
+        let p = Path::new(relative_path);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            self.project_dir.join(p)
+        }
+    }
+
+    /// Upgrades the headless audio engine to a live `cpal` output stream (with automatic
+    /// headless fallback if no audio hardware is present) and applies `master_volume`.
+    pub fn enable_live_audio(&mut self, master_volume: f32) {
+        self.audio = AudioEngine::new_live();
+        self.audio.set_master_volume(master_volume);
+    }
+
+    /// Validates a PNG file on disk (existence + 8-byte PNG header) and queues it for GPU atlas upload,
+    /// returning a deterministic generational [`FgeTexture`] handle even in headless mode.
+    pub fn queue_texture_load_png(&mut self, relative_path: &str) -> FgeTexture {
+        let trimmed = relative_path.trim();
+        if trimmed.is_empty() {
+            return EntityId::INVALID;
+        }
+        let full_path = self.resolve_asset_path(trimmed);
+        let Ok(mut file) = std::fs::File::open(&full_path) else {
+            return EntityId::INVALID;
+        };
+        let mut header = [0u8; 8];
+        if file.read_exact(&mut header).is_err() || header != PNG_SIGNATURE {
+            return EntityId::INVALID;
+        }
+
+        let tex_id = self.texture_arena.allocate();
+        self.texture_uvs.push(None);
+        self.pending_textures.push((tex_id, full_path));
+        tex_id
+    }
+
+    /// Binds `texture` to `entity`. If the texture UV rect has already been resolved by the GPU
+    /// runner, applies it immediately; otherwise queues the binding for the next runner sync.
+    pub fn bind_entity_texture(&mut self, entity: EntityId, texture: FgeTexture) -> bool {
+        if !self.world.is_alive(entity) {
+            return false;
+        }
+        let Some(dense_idx) = self.texture_arena.resolve(texture) else {
+            return false;
+        };
+        if let Some(Some(uv)) = self.texture_uvs.get(dense_idx).copied() {
+            return self.world.set_uv_rect(entity, uv);
+        }
+        self.entity_textures.push((entity, texture));
+        true
+    }
+
+    /// Records the resolved atlas UV rectangle for an ABI-side `texture` handle.
+    pub fn record_resolved_texture_uv(&mut self, texture: FgeTexture, uv: [u16; 4]) {
+        if let Some(dense_idx) = self.texture_arena.resolve(texture) {
+            if let Some(slot) = self.texture_uvs.get_mut(dense_idx) {
+                *slot = Some(uv);
+            }
+        }
+    }
+
+    /// Drains all queued `(FgeTexture, PathBuf)` loads for the GPU runner to upload into `DynamicAtlas`.
+    pub fn take_pending_textures(&mut self) -> Vec<(FgeTexture, PathBuf)> {
+        std::mem::take(&mut self.pending_textures)
+    }
+
+    /// Applies any queued `(EntityId, FgeTexture)` bindings whose textures now have resolved UV rects.
+    pub fn apply_pending_entity_textures(&mut self) {
+        if self.entity_textures.is_empty() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.entity_textures);
+        for (entity, texture) in pending {
+            if !self.world.is_alive(entity) {
+                continue;
+            }
+            if let Some(dense_idx) = self.texture_arena.resolve(texture) {
+                if let Some(Some(uv)) = self.texture_uvs.get(dense_idx).copied() {
+                    let _ = self.world.set_uv_rect(entity, uv);
+                } else {
+                    self.entity_textures.push((entity, texture));
+                }
+            }
+        }
     }
 
     /// Inserts or updates a numeric parameter by `id`.
@@ -145,9 +261,9 @@ impl EngineContext {
         }
     }
 
-    /// Advances frame counters, runs `callback` while `self` is bound as the active C-ABI
-    /// thread-local context, steps kinematic physics (`world.step_kinematics(dt)`), and clears
-    /// per-frame input edge flags.
+    /// Advances frame counters, clears the per-frame UI command queue, runs `callback` while
+    /// `self` is bound as the active C-ABI thread-local context, steps bulk emitters and
+    /// kinematic physics (`world.step_kinematics(dt)`), and clears per-frame input edge flags.
     pub fn step_with_callback<F, R>(&mut self, dt: f32, callback: F) -> Result<R, CoreError>
     where
         F: FnOnce() -> R,
@@ -157,7 +273,9 @@ impl EngineContext {
         }
 
         self.dt = dt;
+        self.ui.clear();
         let out = with_active_context(self, callback);
+        self.emitters.step_emitters(dt, &mut self.world);
         self.world.step_kinematics(dt)?;
         self.frame_count = self.frame_count.saturating_add(1);
         self.input.begin_frame();

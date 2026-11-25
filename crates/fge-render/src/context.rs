@@ -1,6 +1,9 @@
+use std::path::Path;
+
 use fge_core::{camera::Camera2D, sim::SpriteSoA};
 
 use crate::{
+    atlas::{DynamicAtlas, TextureId},
     error::RenderError,
     instance::{pack_soa_instances, CameraUniform, SpriteInstance},
     pipeline::SpriteBatchPipeline,
@@ -45,7 +48,9 @@ pub struct GpuRenderer {
     pub(crate) adapter_info: wgpu::AdapterInfo,
     pub(crate) target: RenderTarget,
     pub(crate) pipeline: SpriteBatchPipeline,
+    pub(crate) atlas: DynamicAtlas,
     pub(crate) scratch_instances: Vec<SpriteInstance>,
+    pub(crate) ui_scratch_instances: Vec<SpriteInstance>,
     pub(crate) depth_sort_mode: DepthSortMode,
 }
 
@@ -205,8 +210,11 @@ impl GpuRenderer {
         };
         surface.configure(&device, &config);
 
-        let pipeline = SpriteBatchPipeline::new(&device, &queue, format, initial_capacity);
+        let mut atlas = DynamicAtlas::new();
+        let mut pipeline = SpriteBatchPipeline::new(&device, &queue, format, initial_capacity);
+        pipeline.upload_atlas_dirty(&queue, &mut atlas);
         let scratch_instances = Vec::with_capacity(initial_capacity);
+        let ui_scratch_instances = Vec::with_capacity(256);
 
         Ok(Self {
             device,
@@ -214,7 +222,9 @@ impl GpuRenderer {
             adapter_info,
             target: RenderTarget::Windowed { surface, config },
             pipeline,
+            atlas,
             scratch_instances,
+            ui_scratch_instances,
             depth_sort_mode: DepthSortMode::default(),
         })
     }
@@ -238,8 +248,11 @@ impl GpuRenderer {
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let (texture, view) = create_offscreen_target(&device, width, height, format);
 
-        let pipeline = SpriteBatchPipeline::new(&device, &queue, format, initial_capacity);
+        let mut atlas = DynamicAtlas::new();
+        let mut pipeline = SpriteBatchPipeline::new(&device, &queue, format, initial_capacity);
+        pipeline.upload_atlas_dirty(&queue, &mut atlas);
         let scratch_instances = Vec::with_capacity(initial_capacity);
+        let ui_scratch_instances = Vec::with_capacity(256);
 
         Ok(Self {
             device,
@@ -253,7 +266,9 @@ impl GpuRenderer {
                 height,
             },
             pipeline,
+            atlas,
             scratch_instances,
+            ui_scratch_instances,
             depth_sort_mode: DepthSortMode::default(),
         })
     }
@@ -315,6 +330,46 @@ impl GpuRenderer {
         self.depth_sort_mode
     }
 
+    /// Read-only access to the renderer's [`DynamicAtlas`].
+    pub fn atlas(&self) -> &DynamicAtlas {
+        &self.atlas
+    }
+
+    /// Mutable access to the renderer's [`DynamicAtlas`]. Any dirty pixels are automatically
+    /// flushed to GPU on the next render call.
+    pub fn atlas_mut(&mut self) -> &mut DynamicAtlas {
+        &mut self.atlas
+    }
+
+    /// Decodes PNG bytes into the 2048x2048 GPU atlas and uploads the dirty region immediately.
+    pub fn load_png_bytes(&mut self, bytes: &[u8]) -> Result<TextureId, RenderError> {
+        let id = self.atlas.load_png_bytes(bytes)?;
+        self.pipeline.upload_atlas_dirty(&self.queue, &mut self.atlas);
+        Ok(id)
+    }
+
+    /// Loads a PNG image file into the 2048x2048 GPU atlas and uploads the dirty region immediately.
+    pub fn load_png_texture(&mut self, path: impl AsRef<Path>) -> Result<TextureId, RenderError> {
+        let id = self.atlas.load_png_file(path.as_ref())?;
+        self.pipeline.upload_atlas_dirty(&self.queue, &mut self.atlas);
+        Ok(id)
+    }
+
+    /// Resolves a loaded [`TextureId`] to its normalized `[u16; 4]` atlas UV rectangle.
+    pub fn get_texture_uv(&self, id: TextureId) -> Option<[u16; 4]> {
+        self.atlas.get_texture_uv(id)
+    }
+
+    /// Loads a TrueType/OpenType font (or `.ttc` collection) from memory into the glyph rasterizer.
+    pub fn load_font_bytes(&mut self, bytes: Vec<u8>) -> Result<(), RenderError> {
+        self.atlas.load_font_bytes(bytes)
+    }
+
+    /// Loads a TrueType/OpenType font (or `.ttc` collection) from disk into the glyph rasterizer.
+    pub fn load_font_file(&mut self, path: impl AsRef<Path>) -> Result<(), RenderError> {
+        self.atlas.load_font_file(path.as_ref())
+    }
+
     /// Packs `soa` into `scratch_instances`, uploads to GPU, executes 1 instanced draw call,
     /// and presents (or waits on GPU submission when offscreen).
     pub fn render_soa(
@@ -325,6 +380,7 @@ impl GpuRenderer {
         clear_color: wgpu::Color,
     ) -> Result<FrameRenderStats, RenderError> {
         let cull_camera = if cull { Some(camera) } else { None };
+        self.pipeline.upload_atlas_dirty(&self.queue, &mut self.atlas);
 
         match &mut self.target {
             RenderTarget::Windowed { surface, config } => {

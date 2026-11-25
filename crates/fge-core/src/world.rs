@@ -32,6 +32,8 @@ pub struct EntityWorld {
     pub z_order: Vec<f32>,
     pub uv_rect: Vec<[u16; 4]>,
     pub color_rgba: Vec<[u8; 4]>,
+    /// Remaining entity lifetime in seconds (`0.0` = infinite lifetime; `> 0.0` = auto-despawns when reaching `<= 0.0`).
+    pub ttl: Vec<f32>,
 }
 
 impl EntityWorld {
@@ -59,6 +61,7 @@ impl EntityWorld {
             z_order: Vec::with_capacity(capacity),
             uv_rect: Vec::with_capacity(capacity),
             color_rgba: Vec::with_capacity(capacity),
+            ttl: Vec::with_capacity(capacity),
         }
     }
 
@@ -107,6 +110,7 @@ impl EntityWorld {
         self.z_order.push(0.0);
         self.uv_rect.push(FULL_UV_RECT);
         self.color_rgba.push(color);
+        self.ttl.push(0.0);
         debug_assert!(self.has_consistent_lengths());
         id
     }
@@ -134,6 +138,7 @@ impl EntityWorld {
         self.z_order.swap_remove(idx);
         self.uv_rect.swap_remove(idx);
         self.color_rgba.swap_remove(idx);
+        self.ttl.swap_remove(idx);
         debug_assert!(self.has_consistent_lengths());
         true
     }
@@ -158,6 +163,7 @@ impl EntityWorld {
         self.z_order.clear();
         self.uv_rect.clear();
         self.color_rgba.clear();
+        self.ttl.clear();
         debug_assert!(self.has_consistent_lengths());
     }
 
@@ -330,7 +336,27 @@ impl EntityWorld {
         Some(self.hp[idx])
     }
 
-    /// Integrates `pos += vel * dt` and `rotation += ang_vel * dt` for all entities with `ENTITY_FLAG_KINEMATIC`.
+    /// Sets remaining lifetime in seconds (`0.0` = infinite lifetime; `> 0.0` = auto-despawns after `ttl_seconds`).
+    #[inline]
+    pub fn set_ttl(&mut self, id: EntityId, ttl_seconds: f32) -> bool {
+        if !ttl_seconds.is_finite() || ttl_seconds < 0.0 {
+            return false;
+        }
+        let Some(idx) = self.arena.resolve(id) else {
+            return false;
+        };
+        self.ttl[idx] = ttl_seconds;
+        true
+    }
+
+    #[inline]
+    pub fn get_ttl(&self, id: EntityId) -> Option<f32> {
+        let idx = self.arena.resolve(id)?;
+        Some(self.ttl[idx])
+    }
+
+    /// Integrates `pos += vel * dt` and `rotation += ang_vel * dt` for all entities with `ENTITY_FLAG_KINEMATIC`,
+    /// then decrements active entity TTLs and auto-despawns expired entities.
     pub fn step_kinematics(&mut self, dt: f32) -> Result<(), CoreError> {
         if !dt.is_finite() || dt < 0.0 {
             return Err(CoreError::InvalidDeltaTime { dt });
@@ -346,6 +372,21 @@ impl EntityWorld {
         integrate_kinematic_column(&mut self.pos_y[..len], &self.vel_y[..len], flags, dt);
         integrate_kinematic_column(&mut self.rotation[..len], &self.ang_vel[..len], flags, dt);
 
+        // Reverse-index TTL countdown so `swap_remove` inside `despawn` never skips an unvisited element.
+        for i in (0..len).rev() {
+            let remaining = self.ttl[i];
+            if remaining > 0.0 {
+                let next = remaining - dt;
+                if next <= 0.0 {
+                    let id = self.entities[i];
+                    self.despawn(id);
+                } else {
+                    self.ttl[i] = next;
+                }
+            }
+        }
+
+        debug_assert!(self.has_consistent_lengths());
         Ok(())
     }
 
@@ -385,6 +426,7 @@ impl EntityWorld {
             && self.z_order.len() == len
             && self.uv_rect.len() == len
             && self.color_rgba.len() == len
+            && self.ttl.len() == len
     }
 }
 

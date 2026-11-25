@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Range};
+use std::{borrow::Cow, fmt::Write as _, ops::Range};
 
 /// Fixed-capacity by-value UTF-8 buffer (`#[repr(C)]`, 124 bytes) matching `FgeTextBuf` in `fge.h`.
 #[repr(C)]
@@ -20,18 +20,36 @@ impl Default for FgeTextBuf {
 }
 
 impl FgeTextBuf {
-    pub fn from_str_lossy(_s: &str) -> Self {
-        todo!("implemented by impl-core5")
+    /// Copies up to 120 UTF-8 bytes from `s`, truncating cleanly at a valid UTF-8 character boundary.
+    pub fn from_str_lossy(s: &str) -> Self {
+        let mut buf = Self::default();
+        let mut end = s.len().min(buf.bytes.len());
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        buf.bytes[..end].copy_from_slice(&s.as_bytes()[..end]);
+        buf.len = end as u32;
+        buf
     }
 
+    /// Returns a safe UTF-8 view of the buffer (zero-allocation `Cow::Borrowed` for valid UTF-8).
+    #[inline]
     pub fn as_str(&self) -> Cow<'_, str> {
-        todo!("implemented by impl-core5")
+        let len = (self.len as usize).min(self.bytes.len());
+        String::from_utf8_lossy(&self.bytes[..len])
     }
 }
 
 /// Truncates `s` cleanly at a UTF-8 character boundary to at most `max_chars` Unicode scalar values.
-pub fn truncate_utf8_chars(_s: &str, _max_chars: u32) -> &str {
-    todo!("implemented by impl-core5")
+#[inline]
+pub fn truncate_utf8_chars(s: &str, max_chars: u32) -> &str {
+    if max_chars == 0 {
+        return "";
+    }
+    match s.char_indices().nth(max_chars as usize) {
+        Some((byte_idx, _)) => &s[..byte_idx],
+        None => s,
+    }
 }
 
 /// Immediate-mode UI / text draw command referencing byte spans inside [`UiCommandQueue::text_arena`].
@@ -92,8 +110,18 @@ impl UiCommandQueue {
         Self::default()
     }
 
+    pub fn with_capacity(cmd_capacity: usize, text_bytes: usize) -> Self {
+        Self {
+            text_arena: String::with_capacity(text_bytes),
+            cmds: Vec::with_capacity(cmd_capacity),
+        }
+    }
+
+    /// Clears queued commands and text spans while preserving allocated heap capacity for zero-alloc reuse.
+    #[inline]
     pub fn clear(&mut self) {
-        todo!("implemented by impl-core5")
+        self.text_arena.clear();
+        self.cmds.clear();
     }
 
     #[inline]
@@ -116,65 +144,153 @@ impl UiCommandQueue {
         &self.text_arena
     }
 
-    pub fn resolve_span(&self, _span: Range<u32>) -> &str {
-        todo!("implemented by impl-core5")
+    #[inline]
+    pub fn resolve_span(&self, span: Range<u32>) -> &str {
+        let start = span.start as usize;
+        let end = span.end as usize;
+        if start <= end && end <= self.text_arena.len() {
+            self.text_arena.get(start..end).unwrap_or("")
+        } else {
+            ""
+        }
     }
 
+    #[inline]
+    fn intern_text(&mut self, text: &str) -> Range<u32> {
+        let start = self.text_arena.len();
+        self.text_arena.push_str(text);
+        let end = self.text_arena.len();
+        debug_assert!(end <= u32::MAX as usize);
+        (start as u32)..(end as u32)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn push_panel(
         &mut self,
-        _x: f32,
-        _y: f32,
-        _w: f32,
-        _h: f32,
-        _bg_color: [u8; 4],
-        _border_color: [u8; 4],
-        _border_px: f32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        bg_color: [u8; 4],
+        border_color: [u8; 4],
+        border_px: f32,
     ) {
-        todo!("implemented by impl-core5")
+        self.cmds.push(UiDrawCmd::Panel {
+            x,
+            y,
+            w,
+            h,
+            bg_color,
+            border_color,
+            border_px,
+        });
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn push_bar(
         &mut self,
-        _x: f32,
-        _y: f32,
-        _w: f32,
-        _h: f32,
-        _ratio: f32,
-        _fill_color: [u8; 4],
-        _bg_color: [u8; 4],
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        ratio: f32,
+        fill_color: [u8; 4],
+        bg_color: [u8; 4],
     ) {
-        todo!("implemented by impl-core5")
+        let clamped_ratio = if ratio.is_finite() {
+            ratio.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        self.cmds.push(UiDrawCmd::Bar {
+            x,
+            y,
+            w,
+            h,
+            ratio: clamped_ratio,
+            fill_color,
+            bg_color,
+        });
     }
 
-    pub fn push_screen_text(&mut self, _x: f32, _y: f32, _font_size: f32, _color: [u8; 4], _text: &str) {
-        todo!("implemented by impl-core5")
+    pub fn push_screen_text(
+        &mut self,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        color: [u8; 4],
+        text: &str,
+    ) {
+        let text_span = self.intern_text(text);
+        self.cmds.push(UiDrawCmd::ScreenText {
+            x,
+            y,
+            font_size,
+            color,
+            text_span,
+        });
     }
 
-    pub fn push_number(&mut self, _x: f32, _y: f32, _font_size: f32, _value: i64, _color: [u8; 4]) {
-        todo!("implemented by impl-core5")
+    pub fn push_number(
+        &mut self,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        value: i64,
+        color: [u8; 4],
+    ) {
+        let start = self.text_arena.len();
+        let _ = write!(&mut self.text_arena, "{value}");
+        let end = self.text_arena.len();
+        debug_assert!(end <= u32::MAX as usize);
+        self.cmds.push(UiDrawCmd::ScreenText {
+            x,
+            y,
+            font_size,
+            color,
+            text_span: (start as u32)..(end as u32),
+        });
     }
 
     pub fn push_world_text(
         &mut self,
-        _world_x: f32,
-        _world_y: f32,
-        _font_size: f32,
-        _color: [u8; 4],
-        _text: &str,
+        world_x: f32,
+        world_y: f32,
+        font_size: f32,
+        color: [u8; 4],
+        text: &str,
     ) {
-        todo!("implemented by impl-core5")
+        let text_span = self.intern_text(text);
+        self.cmds.push(UiDrawCmd::WorldText {
+            world_x,
+            world_y,
+            font_size,
+            color,
+            text_span,
+        });
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn push_dialog_box(
         &mut self,
-        _x: f32,
-        _y: f32,
-        _w: f32,
-        _h: f32,
-        _speaker: &str,
-        _message: &str,
-        _visible_chars: u32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        speaker: &str,
+        message: &str,
+        visible_chars: u32,
     ) {
-        todo!("implemented by impl-core5")
+        let speaker_span = self.intern_text(speaker);
+        let message_span = self.intern_text(message);
+        self.cmds.push(UiDrawCmd::DialogBox {
+            x,
+            y,
+            w,
+            h,
+            speaker_span,
+            message_span,
+            visible_chars,
+        });
     }
 }

@@ -1,0 +1,13 @@
+[game]
+title = "CRYSTAL CHRONICLE - FGE 2D Action RPG"
+width = 1280
+height = 720
+target_fps = 60
+vsync = false
+
+[render]
+y_sort_mode = "composite"
+
+[build]
+entry = "src/main.c"
+sources = ["src/world_map.c", "src/hero.c", "src/npc_quest.c", "src/monsters.c", "src/rpg_ui.c"]
