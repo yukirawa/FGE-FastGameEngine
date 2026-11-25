@@ -45,10 +45,17 @@ impl HotReloader {
     }
 
     /// Polls watched source files for changes and hot-reloads on modification.
+    ///
+    /// Only C modules that explicitly export `fge_on_reload` participate in live hot-reload;
+    /// modules without `fge_on_reload` return `Ok(false)` immediately without scanning or recompiling.
     pub fn poll_and_reload(
         &mut self,
         ctx: &mut fge_abi::context::EngineContext,
     ) -> Result<bool, LoaderError> {
+        if !self.module.has_on_reload() {
+            return Ok(false);
+        }
+
         let new_snapshot = snapshot_watched_files(&self.plan)?;
         if new_snapshot == self.snapshot {
             return Ok(false);
@@ -69,9 +76,6 @@ impl HotReloader {
                 if self.module.has_on_reload() {
                     self.module.call_on_reload(ctx);
                 }
-                // TODO(user-decision): When a reloaded C module does not export `fge_on_reload`,
-                // decide whether hot-reload should keep the world untouched (current default)
-                // or optionally re-run `fge_init`.
                 Ok(true)
             }
             Err(err) => {

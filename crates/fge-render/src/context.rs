@@ -4,6 +4,7 @@ use crate::{
     error::RenderError,
     instance::{pack_soa_instances, CameraUniform, SpriteInstance},
     pipeline::SpriteBatchPipeline,
+    world_batch::DepthSortMode,
 };
 
 /// Surface presentation policy for windowed mode.
@@ -45,6 +46,7 @@ pub struct GpuRenderer {
     pub(crate) target: RenderTarget,
     pub(crate) pipeline: SpriteBatchPipeline,
     pub(crate) scratch_instances: Vec<SpriteInstance>,
+    pub(crate) depth_sort_mode: DepthSortMode,
 }
 
 fn validate_resolution(width: u32, height: u32) -> Result<(), RenderError> {
@@ -213,6 +215,7 @@ impl GpuRenderer {
             target: RenderTarget::Windowed { surface, config },
             pipeline,
             scratch_instances,
+            depth_sort_mode: DepthSortMode::default(),
         })
     }
 
@@ -251,6 +254,7 @@ impl GpuRenderer {
             },
             pipeline,
             scratch_instances,
+            depth_sort_mode: DepthSortMode::default(),
         })
     }
 
@@ -299,6 +303,16 @@ impl GpuRenderer {
             RenderTarget::Windowed { config, .. } => (config.width, config.height),
             RenderTarget::Offscreen { width, height, .. } => (*width, *height),
         }
+    }
+
+    /// Sets the depth sorting strategy used by [`GpuRenderer::render_world`].
+    pub fn set_depth_sort_mode(&mut self, mode: DepthSortMode) {
+        self.depth_sort_mode = mode;
+    }
+
+    /// Returns the currently configured depth sorting strategy.
+    pub fn depth_sort_mode(&self) -> DepthSortMode {
+        self.depth_sort_mode
     }
 
     /// Packs `soa` into `scratch_instances`, uploads to GPU, executes 1 instanced draw call,

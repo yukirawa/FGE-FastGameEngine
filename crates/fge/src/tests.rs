@@ -11,6 +11,7 @@ use crate::{
     cli::{parse_cli_from, BenchArgs, Command, RunArgs},
     config::{
         load_manifest_from_path, parse_manifest_str, BuildSection, GameManifest, GameSection,
+        RenderSection, SpatialSection,
     },
     error::AppError,
     input::InputState,
@@ -107,6 +108,7 @@ fn cli_run_with_path_and_flags() {
             offscreen: true,
             no_hot_reload: false,
             bridge: None,
+            bridge_api_key: None,
         })
     );
 }
@@ -122,6 +124,7 @@ fn cli_run_defaults() {
             offscreen: false,
             no_hot_reload: false,
             bridge: None,
+            bridge_api_key: None,
         })
     );
 }
@@ -167,7 +170,10 @@ sources = ["src/game.c", "src/physics.c"]
             build: BuildSection {
                 entry: String::from("src/game.c"),
                 sources: vec![String::from("src/game.c"), String::from("src/physics.c")],
+                compiler: None,
             },
+            spatial: SpatialSection::default(),
+            render: RenderSection::default(),
         }
     );
 }
@@ -239,7 +245,10 @@ fn manifest_validate_rejects_invalid_fields() {
         build: BuildSection {
             entry: String::from("src/main.c"),
             sources: vec![],
+            compiler: None,
         },
+        spatial: SpatialSection::default(),
+        render: RenderSection::default(),
     };
     assert!(base.validate().is_ok());
 
@@ -295,6 +304,7 @@ fn manifest_validate_rejects_invalid_fields() {
         build: BuildSection {
             entry: String::from(""),
             sources: vec![],
+            compiler: None,
         },
         ..base
     };

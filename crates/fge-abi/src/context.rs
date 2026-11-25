@@ -67,12 +67,27 @@ pub struct EngineContext {
 impl EngineContext {
     /// Creates a new `EngineContext` with viewport `(width, height)`, deterministic `seed`,
     /// and default spatial grid (`cell_size = 64.0`, `buckets = 4096`).
-    ///
-    /// // TODO(user-decision): SpatialHashGrid default `cell_size = 64.0` and `buckets = 4096`
-    /// // are tuned for general 2D STG/RPG scenes; can be exposed in `game.toml` if per-game tuning is desired.
     pub fn new(width: f32, height: f32, seed: u64) -> Result<Self, CoreError> {
+        Self::with_spatial_config(
+            width,
+            height,
+            seed,
+            DEFAULT_SPATIAL_CELL_SIZE,
+            DEFAULT_SPATIAL_BUCKETS,
+        )
+    }
+
+    /// Creates a new `EngineContext` with viewport `(width, height)`, deterministic `seed`,
+    /// and explicit spatial hash grid configuration (`cell_size`, `buckets`).
+    pub fn with_spatial_config(
+        width: f32,
+        height: f32,
+        seed: u64,
+        cell_size: f32,
+        buckets: usize,
+    ) -> Result<Self, CoreError> {
         let camera = Camera2D::from_top_left_viewport(width, height)?;
-        let spatial = SpatialHashGrid::new(DEFAULT_SPATIAL_CELL_SIZE, DEFAULT_SPATIAL_BUCKETS)?;
+        let spatial = SpatialHashGrid::new(cell_size, buckets)?;
         Ok(Self {
             world: EntityWorld::new(),
             camera,

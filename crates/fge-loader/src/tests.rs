@@ -53,7 +53,7 @@ fn write_text(path: &Path, content: &str) {
 #[test]
 fn detect_compiler_and_stage_embedded_header() {
     let (kind, compiler_path) =
-        CompilerKind::detect().expect("a C11 compiler (tcc/clang/gcc) should be available");
+        CompilerKind::detect().expect("a C11 compiler (gcc/clang/tcc) should be available");
     assert!(
         !kind.executable_name().is_empty(),
         "compiler executable name should be non-empty"
@@ -62,6 +62,27 @@ fn detect_compiler_and_stage_embedded_header() {
         !compiler_path.as_os_str().is_empty(),
         "detected compiler path should be non-empty"
     );
+
+    // Decision 3: when FGE_CC is unset and `gcc` is available on PATH, detect() prefers Gcc.
+    let fge_cc_unset = std::env::var_os("FGE_CC")
+        .filter(|v| !v.is_empty())
+        .is_none();
+    let gcc_available = matches!(
+        std::process::Command::new("gcc").arg("--version").output(),
+        Ok(out) if out.status.success()
+    );
+    if fge_cc_unset && gcc_available {
+        assert_eq!(
+            kind,
+            CompilerKind::Gcc,
+            "CompilerKind::detect() must prefer Gcc when gcc is available and FGE_CC is unset"
+        );
+    }
+
+    assert_eq!(CompilerKind::from_name("gcc"), Some(CompilerKind::Gcc));
+    assert_eq!(CompilerKind::from_name(" CLANG "), Some(CompilerKind::Clang));
+    assert_eq!(CompilerKind::from_name("tcc"), Some(CompilerKind::Tcc));
+    assert_eq!(CompilerKind::from_name("unknown"), None);
 
     let tmp = TempTestDir::new("stage_header");
     let out_dir = tmp.path().join("out");
@@ -148,6 +169,7 @@ void fge_shutdown(void) {
         sources: vec!["src/helper.c".to_string()],
         out_dir,
         optimize: false,
+        preferred_compiler: None,
     };
 
     let mut ctx = EngineContext::new(800.0, 600.0, 42).expect("create EngineContext");
@@ -206,6 +228,7 @@ void fge_init(void) {}
         sources: Vec::new(),
         out_dir,
         optimize: false,
+        preferred_compiler: None,
     };
 
     let so_path = compile_shared_library(&plan, 1).expect("compile module without fge_update");
@@ -248,6 +271,8 @@ void fge_init(void) {
     fge_set_tag(g_player, 1u);
 }
 
+void fge_on_reload(void) {}
+
 void fge_update(float dt) {
     (void)dt;
 }
@@ -260,6 +285,7 @@ void fge_update(float dt) {
         sources: Vec::new(),
         out_dir,
         optimize: false,
+        preferred_compiler: None,
     };
 
     let mut ctx = EngineContext::new(800.0, 600.0, 7).expect("create EngineContext");
@@ -337,6 +363,71 @@ void fge_update(float dt) {
     reloader.step_frame(&mut ctx, 0.5).expect("step v2 frame");
     assert!((ctx.world.pos_x[0] - 10.0).abs() < 1e-4);
     assert!((ctx.world.pos_y[0] - 22.5).abs() < 1e-4);
+
+    reloader.shutdown(&mut ctx);
+}
+
+#[test]
+fn hot_reload_skips_when_fge_on_reload_omitted() {
+    let tmp = TempTestDir::new("hot_reload_opt_in");
+    let project_dir = tmp.path().join("project");
+    let out_dir = tmp.path().join("out");
+    fs::create_dir_all(project_dir.join("src")).expect("create src dir");
+    fs::create_dir_all(&out_dir).expect("create out dir");
+
+    let main_c = project_dir.join("src/main.c");
+    let v1_code = r#"#include "fge.h"
+
+static FgeEntity g_actor;
+
+void fge_init(void) {
+    g_actor = fge_spawn_sprite(10.0f, 20.0f, 16.0f, 16.0f, fge_rgba(255, 255, 255, 255));
+    fge_set_tag(g_actor, 10u);
+}
+
+void fge_update(float dt) {
+    (void)dt;
+}
+"#;
+    write_text(&main_c, v1_code);
+
+    let plan = CBuildPlan {
+        project_dir,
+        entry: "src/main.c".to_string(),
+        sources: Vec::new(),
+        out_dir,
+        optimize: false,
+        preferred_compiler: None,
+    };
+
+    let mut ctx = EngineContext::new(800.0, 600.0, 11).expect("create EngineContext");
+    let mut reloader =
+        HotReloader::initial_build_and_load(plan, &mut ctx).expect("initial build without fge_on_reload");
+    assert_eq!(reloader.generation(), 1);
+
+    // Edit .c source with distinct mtime & length; poll_and_reload must remain a no-op.
+    std::thread::sleep(Duration::from_millis(20));
+    let v2_code = r#"#include "fge.h"
+
+void fge_init(void) {}
+void fge_on_reload(void) {}
+void fge_update(float dt) {
+    (void)dt;
+}
+// edited after initial load
+"#;
+    assert_ne!(v2_code.len(), v1_code.len());
+    write_text(&main_c, v2_code);
+
+    let reloaded = reloader
+        .poll_and_reload(&mut ctx)
+        .expect("poll_and_reload should return Ok(false) when fge_on_reload was not exported");
+    assert!(!reloaded, "poll_and_reload must return Ok(false) when fge_on_reload is omitted");
+    assert_eq!(reloader.generation(), 1, "generation must remain 1");
+    assert!(reloader.last_compile_error().is_none());
+
+    reloader.step_frame(&mut ctx, 1.0 / 60.0).expect("v1 continues stepping");
+    assert_eq!(ctx.world.tag[0], 10);
 
     reloader.shutdown(&mut ctx);
 }

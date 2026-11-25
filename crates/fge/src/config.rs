@@ -10,6 +10,10 @@ pub struct GameManifest {
     pub game: GameSection,
     #[serde(default)]
     pub build: BuildSection,
+    #[serde(default)]
+    pub spatial: SpatialSection,
+    #[serde(default)]
+    pub render: RenderSection,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,6 +35,8 @@ pub struct BuildSection {
     pub entry: String,
     #[serde(default)]
     pub sources: Vec<String>,
+    #[serde(default)]
+    pub compiler: Option<String>,
 }
 
 impl Default for BuildSection {
@@ -38,8 +44,40 @@ impl Default for BuildSection {
         Self {
             entry: default_entry(),
             sources: Vec::new(),
+            compiler: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpatialSection {
+    #[serde(default = "default_cell_size")]
+    pub cell_size: f32,
+    #[serde(default = "default_buckets")]
+    pub buckets: usize,
+}
+
+impl Default for SpatialSection {
+    fn default() -> Self {
+        Self {
+            cell_size: default_cell_size(),
+            buckets: default_buckets(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum YSortModeConfig {
+    #[default]
+    Fast,
+    Composite,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderSection {
+    #[serde(default)]
+    pub y_sort_mode: YSortModeConfig,
 }
 
 const fn default_width() -> u32 {
@@ -58,8 +96,16 @@ fn default_entry() -> String {
     String::from("src/main.c")
 }
 
+const fn default_cell_size() -> f32 {
+    64.0
+}
+
+const fn default_buckets() -> usize {
+    4096
+}
+
 impl GameManifest {
-    /// Validates manifest invariants (`!title.trim().is_empty()`, `width > 0`, `height > 0`, `target_fps > 0`, `!entry.trim().is_empty()`).
+    /// Validates manifest invariants (`!title.trim().is_empty()`, `width > 0`, `height > 0`, `target_fps > 0`, `!entry.trim().is_empty()`, valid `build.compiler`, valid `spatial` config).
     pub fn validate(&self) -> Result<(), AppError> {
         if self.game.title.trim().is_empty() {
             return Err(AppError::InvalidManifest {
@@ -84,6 +130,27 @@ impl GameManifest {
         if self.build.entry.trim().is_empty() {
             return Err(AppError::InvalidManifest {
                 reason: String::from("build.entry must not be empty"),
+            });
+        }
+        if let Some(ref c) = self.build.compiler {
+            let normalized = c.trim().to_ascii_lowercase();
+            if !matches!(normalized.as_str(), "gcc" | "clang" | "tcc") {
+                return Err(AppError::InvalidManifest {
+                    reason: format!(
+                        "build.compiler must be one of \"gcc\", \"clang\", or \"tcc\" (got {:?})",
+                        c
+                    ),
+                });
+            }
+        }
+        if !(self.spatial.cell_size.is_finite() && self.spatial.cell_size > 0.0) {
+            return Err(AppError::InvalidManifest {
+                reason: String::from("spatial.cell_size must be finite and greater than 0.0"),
+            });
+        }
+        if !(self.spatial.buckets > 0 && self.spatial.buckets.is_power_of_two()) {
+            return Err(AppError::InvalidManifest {
+                reason: String::from("spatial.buckets must be a positive power of two"),
             });
         }
         Ok(())

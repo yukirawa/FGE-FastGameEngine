@@ -45,11 +45,33 @@ fn encode_and_submit(
     draw_calls
 }
 
+/// Depth sorting strategy for visible entities in [`pack_world_instances_with_mode`].
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum DepthSortMode {
+    /// Fast single-float sort key (`z_order + pos_y * 1e-4`), suited for standard 2D scenes.
+    #[default]
+    FastFloat,
+    /// Composite `(z_order.floor() as i32, pos_y_key, z_order)` key that preserves exact Y-sort
+    /// ordering even at open-world coordinates exceeding 1,000,000 px.
+    CompositeLayerY,
+}
+
 /// Packs visible `EntityWorld` entities into `out`, applying optional `Camera2D` frustum culling
-/// and sorting by effective depth (`z_order` + normalized `pos_y` when `ENTITY_FLAG_Y_SORT` is set).
+/// and sorting by effective depth using [`DepthSortMode::FastFloat`].
 pub fn pack_world_instances(
     world: &EntityWorld,
     cull_camera: Option<&Camera2D>,
+    out: &mut Vec<SpriteInstance>,
+) -> u32 {
+    pack_world_instances_with_mode(world, cull_camera, DepthSortMode::FastFloat, out)
+}
+
+/// Packs visible `EntityWorld` entities into `out`, applying optional `Camera2D` frustum culling
+/// and sorting by effective depth using the requested [`DepthSortMode`].
+pub fn pack_world_instances_with_mode(
+    world: &EntityWorld,
+    cull_camera: Option<&Camera2D>,
+    mode: DepthSortMode,
     out: &mut Vec<SpriteInstance>,
 ) -> u32 {
     out.clear();
@@ -103,46 +125,99 @@ pub fn pack_world_instances(
         return out.len() as u32;
     }
 
-    let mut keyed: Vec<(f32, SpriteInstance)> = Vec::with_capacity(len);
-    for i in 0..len {
-        let f = flags[i];
-        if (f & ENTITY_FLAG_VISIBLE) == 0 {
-            continue;
-        }
-        let x = pos_x[i];
-        let y = pos_y[i];
-        let w = size_w[i];
-        let h = size_h[i];
-        let rot = rotation[i];
-        if let Some(cam) = cull_camera {
-            if !cam.is_visible(Vec2::new(x, y), Vec2::new(w * 0.5, h * 0.5), rot != 0.0) {
-                continue;
+    match mode {
+        DepthSortMode::FastFloat => {
+            let mut keyed: Vec<(f32, SpriteInstance)> = Vec::with_capacity(len);
+            for i in 0..len {
+                let f = flags[i];
+                if (f & ENTITY_FLAG_VISIBLE) == 0 {
+                    continue;
+                }
+                let x = pos_x[i];
+                let y = pos_y[i];
+                let w = size_w[i];
+                let h = size_h[i];
+                let rot = rotation[i];
+                if let Some(cam) = cull_camera {
+                    if !cam.is_visible(Vec2::new(x, y), Vec2::new(w * 0.5, h * 0.5), rot != 0.0) {
+                        continue;
+                    }
+                }
+                let sort_key = if (f & ENTITY_FLAG_Y_SORT) != 0 {
+                    z_order[i] + y * 1e-4
+                } else {
+                    z_order[i]
+                };
+                keyed.push((
+                    sort_key,
+                    SpriteInstance {
+                        pos: [x, y],
+                        size: [w, h],
+                        uv_rect: uv_rect[i],
+                        rotation: rot,
+                        color: color_rgba[i],
+                    },
+                ));
             }
+
+            keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+            if out.capacity() < keyed.len() {
+                out.reserve(keyed.len());
+            }
+            out.extend(keyed.into_iter().map(|(_, inst)| inst));
         }
-        // TODO(user-decision): Y-sort tie-break scale `1e-4` keeps `pos_y` ordered within integer `z_order` layers up to 10,000px; can switch to `(i32 layer, f32 y)` composite key if huge open-world coordinates exceed 100k px
-        let sort_key = if (f & ENTITY_FLAG_Y_SORT) != 0 {
-            z_order[i] + y * 1e-4
-        } else {
-            z_order[i]
-        };
-        keyed.push((
-            sort_key,
-            SpriteInstance {
-                pos: [x, y],
-                size: [w, h],
-                uv_rect: uv_rect[i],
-                rotation: rot,
-                color: color_rgba[i],
-            },
-        ));
+        DepthSortMode::CompositeLayerY => {
+            let mut keyed: Vec<(i32, f32, f32, SpriteInstance)> = Vec::with_capacity(len);
+            for i in 0..len {
+                let f = flags[i];
+                if (f & ENTITY_FLAG_VISIBLE) == 0 {
+                    continue;
+                }
+                let x = pos_x[i];
+                let y = pos_y[i];
+                let w = size_w[i];
+                let h = size_h[i];
+                let rot = rotation[i];
+                if let Some(cam) = cull_camera {
+                    if !cam.is_visible(Vec2::new(x, y), Vec2::new(w * 0.5, h * 0.5), rot != 0.0) {
+                        continue;
+                    }
+                }
+                let z = z_order[i];
+                let layer = z.floor() as i32;
+                let pos_y_key = if (f & ENTITY_FLAG_Y_SORT) != 0 {
+                    y
+                } else {
+                    0.0
+                };
+                keyed.push((
+                    layer,
+                    pos_y_key,
+                    z,
+                    SpriteInstance {
+                        pos: [x, y],
+                        size: [w, h],
+                        uv_rect: uv_rect[i],
+                        rotation: rot,
+                        color: color_rgba[i],
+                    },
+                ));
+            }
+
+            keyed.sort_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.1.total_cmp(&b.1))
+                    .then_with(|| a.2.total_cmp(&b.2))
+            });
+
+            if out.capacity() < keyed.len() {
+                out.reserve(keyed.len());
+            }
+            out.extend(keyed.into_iter().map(|(_, _, _, inst)| inst));
+        }
     }
 
-    keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
-
-    if out.capacity() < keyed.len() {
-        out.reserve(keyed.len());
-    }
-    out.extend(keyed.into_iter().map(|(_, inst)| inst));
     out.len() as u32
 }
 
@@ -181,8 +256,12 @@ impl GpuRenderer {
                     }
                 };
 
-                let submitted_instances =
-                    pack_world_instances(world, cull_camera, &mut self.scratch_instances);
+                let submitted_instances = pack_world_instances_with_mode(
+                    world,
+                    cull_camera,
+                    self.depth_sort_mode,
+                    &mut self.scratch_instances,
+                );
                 let camera_uniform = CameraUniform::from_camera(camera);
 
                 let draw_calls = {
@@ -215,8 +294,12 @@ impl GpuRenderer {
                 })
             }
             RenderTarget::Offscreen { view, .. } => {
-                let submitted_instances =
-                    pack_world_instances(world, cull_camera, &mut self.scratch_instances);
+                let submitted_instances = pack_world_instances_with_mode(
+                    world,
+                    cull_camera,
+                    self.depth_sort_mode,
+                    &mut self.scratch_instances,
+                );
                 let camera_uniform = CameraUniform::from_camera(camera);
 
                 self.pipeline.prepare(

@@ -80,6 +80,10 @@ pub struct RunArgs {
     /// Optional TCP address to listen on for live AI Bridge JSON-RPC connections (e.g. `127.0.0.1:7777`).
     #[arg(long)]
     pub bridge: Option<String>,
+
+    /// Optional API key required to authenticate AI Bridge JSON-RPC clients (falls back to `FGE_BRIDGE_API_KEY`).
+    #[arg(long)]
+    pub bridge_api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Args)]

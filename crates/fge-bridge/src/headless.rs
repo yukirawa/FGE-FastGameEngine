@@ -3,7 +3,11 @@ use std::time::Instant;
 
 use fge_abi::context::EngineContext;
 use fge_core::spatial::CollisionPair;
-use fge_loader::{compiler::CBuildPlan, error::LoaderError, hot_reload::HotReloader};
+use fge_loader::{
+    compiler::{CBuildPlan, CompilerKind},
+    error::LoaderError,
+    hot_reload::HotReloader,
+};
 
 use crate::snapshot::{
     capture_world_snapshot, CompileDiagnostic, HeadlessTestReport, SimTimingReport,
@@ -60,8 +64,20 @@ fn empty_report(cfg: &HeadlessConfig, status: &str) -> HeadlessTestReport {
     }
 }
 
-/// Compiles, loads, and executes a C11 game project without opening a window or initializing `wgpu`.
+/// Compiles, loads, and executes a C11 game project without opening a window or initializing `wgpu`,
+/// using default spatial hash grid settings (`cell_size = 64.0`, `buckets = 4096`) and default compiler priority.
 pub fn run_headless_test(cfg: &HeadlessConfig) -> HeadlessTestReport {
+    run_headless_test_with_options(cfg, 64.0, 4096, None)
+}
+
+/// Compiles, loads, and executes a C11 game project headlessly with explicit spatial grid
+/// parameters and optional preferred compiler toolchain.
+pub fn run_headless_test_with_options(
+    cfg: &HeadlessConfig,
+    cell_size: f32,
+    buckets: usize,
+    preferred_compiler: Option<CompilerKind>,
+) -> HeadlessTestReport {
     if !cfg.dt.is_finite() || cfg.dt < 0.0 {
         let mut report = empty_report(cfg, "config_error");
         report
@@ -70,7 +86,13 @@ pub fn run_headless_test(cfg: &HeadlessConfig) -> HeadlessTestReport {
         return report;
     }
 
-    let mut ctx = match EngineContext::new(cfg.width as f32, cfg.height as f32, cfg.seed) {
+    let mut ctx = match EngineContext::with_spatial_config(
+        cfg.width as f32,
+        cfg.height as f32,
+        cfg.seed,
+        cell_size,
+        buckets,
+    ) {
         Ok(ctx) => ctx,
         Err(err) => {
             let mut report = empty_report(cfg, "config_error");
@@ -85,6 +107,7 @@ pub fn run_headless_test(cfg: &HeadlessConfig) -> HeadlessTestReport {
         sources: cfg.sources.clone(),
         out_dir: std::env::temp_dir().join("fge_headless_cache"),
         optimize: true,
+        preferred_compiler,
     };
 
     let reloader = match HotReloader::initial_build_and_load(plan, &mut ctx) {

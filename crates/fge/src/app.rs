@@ -6,7 +6,7 @@ use std::{
 
 use fge_abi::context::EngineContext;
 use fge_bridge::{
-    headless::{run_headless_test, HeadlessConfig},
+    headless::{run_headless_test_with_options, HeadlessConfig},
     server::BridgeServer,
     snapshot::HeadlessTestReport,
 };
@@ -16,10 +16,14 @@ use fge_core::{
     sim::{BulkSimulation, SimConfig, SpriteSoA},
     stats::{BenchSummary, FrameStatsTracker},
 };
-use fge_loader::{compiler::CBuildPlan, hot_reload::HotReloader};
+use fge_loader::{
+    compiler::{CBuildPlan, CompilerKind},
+    hot_reload::HotReloader,
+};
 use fge_render::{
     context::{FrameRenderStats, GpuRenderer, PresentPolicy},
     error::RenderError,
+    world_batch::DepthSortMode,
 };
 use winit::{
     application::ApplicationHandler,
@@ -32,7 +36,7 @@ use winit::{
 
 use crate::{
     cli::{BenchArgs, Cli, Command, RunArgs, TestArgs},
-    config::{load_manifest_from_path, GameManifest, GameSection},
+    config::{load_manifest_from_path, GameManifest, GameSection, YSortModeConfig},
     error::AppError,
     input::InputState,
     keymap::apply_window_event_to_core_input,
@@ -139,8 +143,18 @@ fn resolve_project_dir(path: &Path) -> PathBuf {
 /// Loads `game.toml`, compiles and dynamically loads the C11 game module via `fge-loader`,
 /// and runs the engine loop (either offscreen or windowed via `winit`) with optional hot-reload.
 pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
-    let GameManifest { game, build } = load_manifest_from_path(&args.project_dir)?;
+    let GameManifest {
+        game,
+        build,
+        spatial,
+        render,
+    } = load_manifest_from_path(&args.project_dir)?;
     let project_dir = resolve_project_dir(&args.project_dir);
+    let depth_sort_mode = match render.y_sort_mode {
+        YSortModeConfig::Fast => DepthSortMode::FastFloat,
+        YSortModeConfig::Composite => DepthSortMode::CompositeLayerY,
+    };
+    let preferred_compiler = build.compiler.as_deref().and_then(CompilerKind::from_name);
 
     log::info!(
         "Booting '{}' ({}x{}, target {} FPS, vsync={}, entry={}, hot_reload={})",
@@ -153,18 +167,31 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
         !args.no_hot_reload,
     );
 
-    let mut ctx = EngineContext::new(game.width as f32, game.height as f32, 42)?;
+    let mut ctx = EngineContext::with_spatial_config(
+        game.width as f32,
+        game.height as f32,
+        42,
+        spatial.cell_size,
+        spatial.buckets,
+    )?;
     let plan = CBuildPlan {
         project_dir,
         entry: build.entry,
         sources: build.sources,
         out_dir: std::env::temp_dir().join("fge_build_cache"),
         optimize: true,
+        preferred_compiler,
     };
     let mut reloader = HotReloader::initial_build_and_load(plan, &mut ctx)?;
 
+    let bridge_api_key = args
+        .bridge_api_key
+        .clone()
+        .or_else(|| std::env::var("FGE_BRIDGE_API_KEY").ok())
+        .filter(|k| !k.is_empty());
+
     let mut bridge = if let Some(addr) = args.bridge.as_deref() {
-        let server = BridgeServer::bind(addr)?;
+        let server = BridgeServer::bind_with_api_key(addr, bridge_api_key)?;
         match server.local_addr() {
             Ok(local_addr) => log::info!("AI Bridge listening on {}", local_addr),
             Err(_) => log::info!("AI Bridge listening on {}", addr),
@@ -180,6 +207,7 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
             game.height,
             ctx.world.len().max(INITIAL_WORLD_RENDER_CAPACITY),
         )?;
+        renderer.set_depth_sort_mode(depth_sort_mode);
         let target_frames = if args.frames == 0 {
             DEFAULT_GAME_OFFSCREEN_FRAMES
         } else {
@@ -259,6 +287,7 @@ pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
     let mut app = WindowedGameApp {
         args,
         game: &game,
+        depth_sort_mode,
         display_handle: Some(display_handle),
         window: None,
         renderer: None,
@@ -554,6 +583,7 @@ impl ApplicationHandler for WindowedBenchApp<'_> {
 struct WindowedGameApp<'a> {
     args: &'a RunArgs,
     game: &'a GameSection,
+    depth_sort_mode: DepthSortMode,
     display_handle: Option<OwnedDisplayHandle>,
     window: Option<Arc<Window>>,
     renderer: Option<GpuRenderer>,
@@ -611,7 +641,8 @@ impl ApplicationHandler for WindowedGameApp<'_> {
             policy,
             self.ctx.world.len().max(INITIAL_WORLD_RENDER_CAPACITY),
         ) {
-            Ok(renderer) => {
+            Ok(mut renderer) => {
+                renderer.set_depth_sort_mode(self.depth_sort_mode);
                 let _ = self
                     .ctx
                     .camera
@@ -737,8 +768,14 @@ impl ApplicationHandler for WindowedGameApp<'_> {
 
 /// Executes a `game.toml` project headlessly via `fge-bridge` and returns a structured report.
 pub fn run_test_cmd(args: &TestArgs) -> Result<HeadlessTestReport, AppError> {
-    let GameManifest { game, build } = load_manifest_from_path(&args.project_dir)?;
+    let GameManifest {
+        game,
+        build,
+        spatial,
+        ..
+    } = load_manifest_from_path(&args.project_dir)?;
     let project_dir = resolve_project_dir(&args.project_dir);
+    let preferred_compiler = build.compiler.as_deref().and_then(CompilerKind::from_name);
     let cfg = HeadlessConfig {
         project_dir,
         project_title: game.title,
@@ -751,5 +788,10 @@ pub fn run_test_cmd(args: &TestArgs) -> Result<HeadlessTestReport, AppError> {
         dt: args.dt,
         snapshot_entity_limit: None,
     };
-    Ok(run_headless_test(&cfg))
+    Ok(run_headless_test_with_options(
+        &cfg,
+        spatial.cell_size,
+        spatial.buckets,
+        preferred_compiler,
+    ))
 }

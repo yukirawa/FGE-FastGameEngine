@@ -12,7 +12,7 @@ use fge_core::handle::EntityId;
 use fge_core::input_core::FgeKey;
 
 use crate::headless::{run_headless_test, HeadlessConfig};
-use crate::protocol::{handle_rpc_line, BridgeState, RpcResponse};
+use crate::protocol::{handle_rpc_line, BridgeState, RpcResponse, RPC_ERR_UNAUTHORIZED};
 use crate::server::BridgeServer;
 use crate::snapshot::{EntitySnapshot, WorldSnapshot};
 
@@ -470,6 +470,97 @@ fn bridge_server_live_tcp_loopback_partial_writes() {
         snapshot.entities[0].dialogue.as_deref(),
         Some("Loopback NPC")
     );
+}
+
+#[test]
+fn bridge_server_live_tcp_api_key_authentication() {
+    let mut server = BridgeServer::bind_with_api_key("127.0.0.1:0", Some(String::from("secret-token")))
+        .expect("bind authenticated loopback BridgeServer");
+    let addr = server.local_addr().expect("local_addr");
+    let mut ctx = EngineContext::new(1280.0, 720.0, 13).expect("create EngineContext");
+
+    let mut client = TcpStream::connect(addr).expect("connect TcpStream to BridgeServer");
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("set read timeout");
+    let mut reader = BufReader::new(client.try_clone().expect("clone TcpStream"));
+
+    let mut send_and_recv = |req_json: &str| -> RpcResponse {
+        client
+            .write_all(format!("{req_json}\n").as_bytes())
+            .expect("write request");
+        client.flush().expect("flush request");
+
+        let mut processed = 0usize;
+        for _ in 0..100 {
+            processed += server.poll_frame(&mut ctx);
+            if processed >= 1 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(processed, 1, "expected 1 RPC line processed for {req_json}");
+
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read RPC response");
+        parse_rpc_response(line.trim_end())
+    };
+
+    // 1. Unauthenticated request must fail with -32003.
+    let unauth = send_and_recv(r#"{"jsonrpc":"2.0","id":1,"method":"fge.ping","params":{}}"#);
+    assert_eq!(
+        unauth.error.as_ref().map(|e| e.code),
+        Some(RPC_ERR_UNAUTHORIZED),
+        "expected -32003 for unauthenticated ping, got {unauth:?}"
+    );
+    assert_eq!(RPC_ERR_UNAUTHORIZED, -32003);
+
+    // 2. Wrong api_key on fge.auth must also fail with -32003.
+    let wrong_auth = send_and_recv(
+        r#"{"jsonrpc":"2.0","id":2,"method":"fge.auth","params":{"api_key":"wrong-token"}}"#,
+    );
+    assert_eq!(
+        wrong_auth.error.as_ref().map(|e| e.code),
+        Some(RPC_ERR_UNAUTHORIZED)
+    );
+
+    // 3. Per-request params.api_key succeeds without permanently authenticating the session.
+    let per_req = send_and_recv(
+        r#"{"jsonrpc":"2.0","id":3,"method":"fge.ping","params":{"api_key":"secret-token"}}"#,
+    );
+    assert!(per_req.error.is_none(), "per-request api_key failed: {per_req:?}");
+    assert_eq!(per_req.result.expect("ping result")["ok"], serde_json::json!(true));
+
+    let still_unauth = send_and_recv(r#"{"jsonrpc":"2.0","id":4,"method":"fge.ping","params":{}}"#);
+    assert_eq!(
+        still_unauth.error.as_ref().map(|e| e.code),
+        Some(RPC_ERR_UNAUTHORIZED)
+    );
+
+    // 4. fge.auth with the valid token authenticates the TCP connection.
+    let auth_ok = send_and_recv(
+        r#"{"jsonrpc":"2.0","id":5,"method":"fge.auth","params":{"api_key":"secret-token"}}"#,
+    );
+    assert!(auth_ok.error.is_none(), "fge.auth failed: {auth_ok:?}");
+    assert_eq!(
+        auth_ok.result.expect("auth result")["authenticated"],
+        serde_json::json!(true)
+    );
+
+    // 5. Subsequent calls on the same authenticated TCP connection succeed without api_key.
+    let post_auth_ping =
+        send_and_recv(r#"{"jsonrpc":"2.0","id":6,"method":"fge.ping","params":{}}"#);
+    assert!(post_auth_ping.error.is_none(), "post-auth ping failed: {post_auth_ping:?}");
+    assert_eq!(
+        post_auth_ping.result.expect("ping result")["ok"],
+        serde_json::json!(true)
+    );
+
+    let spawn_ok = send_and_recv(
+        r#"{"jsonrpc":"2.0","id":7,"method":"fge.entity.spawn","params":{"x":12.0,"y":34.0}}"#,
+    );
+    assert!(spawn_ok.error.is_none(), "post-auth spawn failed: {spawn_ok:?}");
+    assert_eq!(ctx.world.len(), 1);
 }
 
 #[test]

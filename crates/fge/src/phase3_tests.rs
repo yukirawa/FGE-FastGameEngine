@@ -35,6 +35,7 @@ fn cli_run_parses_demo_game_with_frames_offscreen_and_no_hot_reload() {
             offscreen: true,
             no_hot_reload: true,
             bridge: None,
+            bridge_api_key: None,
         })
     );
 }
@@ -47,6 +48,7 @@ fn run_project_executes_demo_game_offscreen_for_20_frames() {
         offscreen: true,
         no_hot_reload: false,
         bridge: None,
+        bridge_api_key: None,
     };
 
     let summary = match run_project(&args) {

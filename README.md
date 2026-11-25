@@ -16,8 +16,8 @@ crates/
 │               # Camera2D, O(N) SpatialHashGrid, BulkSimulation, CoreInputState, FrameStatsTracker
 ├── fge-abi     # Thread-local EngineContext + 47 zero-pointer #[no_mangle] extern "C" symbols
 │               # matching include/fge.h (handles, physics, collisions, input, AI mailbox/metrics)
-├── fge-loader  # Native C11 multi-file compiler driver (tcc / clang / gcc, FGE_CC override),
-│               # embedded fge.h staging, dlopen LoadedGameModule, mtime-based HotReloader
+├── fge-loader  # Native C11 multi-file compiler driver (gcc / clang / tcc priority, FGE_CC & [build] compiler),
+│               # embedded fge.h staging, dlopen LoadedGameModule, opt-in fge_on_reload HotReloader
 ├── fge-bridge  # GPU-free deterministic run_headless_test() + structured HeadlessTestReport,
 │               # WorldSnapshot capture, JSON-RPC 2.0 protocol, single-threaded non-blocking TcpListener
 ├── fge-render  # Single-draw-call instanced 2D wgpu renderer, Y-sort + Camera2D frustum culling,
@@ -51,11 +51,12 @@ fge run ./examples/demo_game --offscreen --frames 60 --no-hot-reload
 # 3. GPU-free deterministic headless test runner (structured JSON report for AI loops)
 fge test ./examples/demo_game --frames 600 --seed 42 --dt 0.0166667 --dump-json
 
-# 4. Launch a game with the live JSON-RPC 2.0 AI Bridge enabled
+# 4. Launch a game with the live JSON-RPC 2.0 AI Bridge enabled (with optional API key auth)
 fge run ./examples/demo_game --bridge 127.0.0.1:7777
+fge run ./examples/demo_game --bridge 127.0.0.1:7777 --bridge-api-key secret-token
 ```
 
-> **Compiler selection**: `fge-loader` automatically detects `tcc`, `clang`, or `gcc` (or honors the `FGE_CC` environment variable) and embeds `include/fge.h` automatically so game projects require no manual include paths.
+> **Compiler selection**: `fge-loader` prefers `gcc`, then `clang`, then `tcc` (or honors `[build] compiler` in `game.toml` and the `FGE_CC` environment variable) and embeds `include/fge.h` automatically so game projects require no manual include paths.
 
 ---
 
@@ -75,7 +76,19 @@ vsync = false
 [build]
 entry = "src/main.c"
 sources = ["src/enemy.c"]
+compiler = "gcc"          # Optional: "gcc" | "clang" | "tcc" (default probe: gcc -> clang -> tcc)
+
+[spatial]
+cell_size = 64.0          # SpatialHashGrid cell size in world units (> 0.0)
+buckets = 4096            # SpatialHashGrid bucket count (must be a positive power of two)
+
+[render]
+y_sort_mode = "fast"      # "fast" (z_order + y*1e-4) or "composite" ((layer, y, z) for huge worlds)
 ```
+
+- **`[build].compiler`**: Optional toolchain preference (`"gcc"`, `"clang"`, or `"tcc"`). `FGE_CC` environment variable overrides manifest and default detection (`gcc -> clang -> tcc`).
+- **`[spatial]`**: Tunes `SpatialHashGrid` (`cell_size > 0.0` finite, `buckets` positive power of two) per project.
+- **`[render].y_sort_mode`**: `"fast"` (default) uses `z_order + pos_y * 1e-4`; `"composite"` uses exact `(z_order.floor() as i32, pos_y, z_order)` ordering so Y-sort remains exact at huge open-world coordinates (e.g., `pos_y >= 500_000`) without bleeding across integer Z layers.
 
 ```c
 /* my_game/src/main.c */
@@ -118,7 +131,7 @@ void fge_shutdown(void) {
 }
 ```
 
-Optional hot-reload hook: export `void fge_on_reload(void)` in your C module to run custom re-initialization after a live code reload.
+**Hot-reload opt-in (`fge_on_reload`)**: `HotReloader` only hot-reloads C modules that export `void fge_on_reload(void)`. Modules that omit `fge_on_reload` skip hot-reloading (`poll_and_reload` returns `Ok(false)`) so live simulation state is preserved cleanly.
 
 ---
 
@@ -130,10 +143,18 @@ When started with `fge run <dir> --bridge 127.0.0.1:7777`, FGE accepts newline-d
 printf '{"jsonrpc":"2.0","id":1,"method":"fge.ping","params":{}}\n' | nc 127.0.0.1 7777
 ```
 
+### Bridge Authentication (`--bridge-api-key` / `FGE_BRIDGE_API_KEY`)
+
+Pass `--bridge-api-key <SECRET>` (or set `FGE_BRIDGE_API_KEY=<SECRET>`) to require authentication on the TCP bridge:
+- Clients can authenticate their TCP session once via `fge.auth` (`{"api_key": "<SECRET>"}`), after which subsequent requests on that connection succeed without re-sending the key.
+- Alternatively, clients can pass `"api_key": "<SECRET>"` inside `params` on individual requests.
+- Unauthenticated requests fail with JSON-RPC error `-32003` (`Unauthorized`).
+
 ### Supported RPC Methods
 
 | Category | Method | Params | Description |
 | --- | --- | --- | --- |
+| Auth | `fge.auth` | `{ api_key }` | Authenticates the current TCP connection for subsequent RPC calls. |
 | Health | `fge.ping` | `{}` | Returns `ok`, current `frame`, and live `entities` count. |
 | Observe | `fge.world.snapshot` | `{ limit?: usize }` | Captures `WorldSnapshot` (frame, camera, entities, collisions, params, metrics). |
 | Observe | `fge.world.query_nearby` | `{ x, y, radius, layer_mask? }` | Lists `EntitySnapshot`s within circle `(x, y, radius)`. |
@@ -147,7 +168,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"fge.ping","params":{}}\n' | nc 127.0.0
 | Intervene | `fge.param.set` | `{ id, value }` | Sets a numeric parameter readable by C code via `fge_param_get()`. |
 | Intervene | `fge.camera.set` | `{ center_x, center_y, zoom }` | Updates the active `Camera2D` center and zoom. |
 
-**Error Codes**: `-32700` (parse error), `-32601` (method not found), `-32602` (invalid params), `-32001` (entity dead or stale handle).
+**Error Codes**: `-32700` (parse error), `-32601` (method not found), `-32602` (invalid params), `-32001` (entity dead or stale handle), `-32003` (unauthorized / missing or invalid API key).
 
 ### Headless Test Report (`fge test --dump-json`)
 `run_headless_test` emits a `HeadlessTestReport` JSON object containing:
@@ -171,20 +192,3 @@ done
 # Strict C11 public header validation
 gcc -fsyntax-only -std=c11 -Wall -Wextra -Werror -pedantic include/fge.h
 ```
-
----
-
-## Open Design Decisions (`TODO(user-decision)`)
-
-The following design trade-offs are tagged directly in the codebase for user review:
-
-1. **Spatial Hash Grid defaults** — [`crates/fge-abi/src/context.rs:71`](crates/fge-abi/src/context.rs#L71):
-   `SpatialHashGrid` defaults to `cell_size = 64.0` and `buckets = 4096` for general 2D STG/RPG scenes; consider exposing these in `game.toml` for per-game tuning.
-2. **C11 compiler backend priority** — [`crates/fge-loader/src/compiler.rs:30`](crates/fge-loader/src/compiler.rs#L30):
-   Evaluate optional in-process `libtcc` static linking versus external `tcc` / `clang` / `gcc` driver priority (`FGE_CC` override is already supported).
-3. **Hot-reload behavior when `fge_on_reload` is absent** — [`crates/fge-loader/src/hot_reload.rs:72`](crates/fge-loader/src/hot_reload.rs#L72):
-   Currently keeps the live `EntityWorld` untouched on reload if the module does not export `fge_on_reload`; decide whether to offer an optional flag to re-run `fge_init`.
-4. **Y-sort tie-breaking precision for huge open worlds** — [`crates/fge-render/src/world_batch.rs:122`](crates/fge-render/src/world_batch.rs#L122):
-   Currently uses `z_order + pos_y * 1e-4` (cleanly separates integer `z_order` layers up to 10,000px); switch to a `(i32 layer, f32 y)` composite key if open-world coordinates exceed 100k px.
-5. **Optional Unix Domain Socket transport for AI Bridge** — [`crates/fge-bridge/src/server.rs:24`](crates/fge-bridge/src/server.rs#L24):
-   Currently uses non-blocking TCP loopback (`127.0.0.1:<port>`); evaluate adding an optional Unix Domain Socket listener on Linux/macOS for lower-latency local IPC.

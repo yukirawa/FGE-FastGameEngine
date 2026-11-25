@@ -12,7 +12,7 @@ use crate::{
     context::GpuRenderer,
     error::RenderError,
     instance::SpriteInstance,
-    world_batch::pack_world_instances,
+    world_batch::{pack_world_instances, pack_world_instances_with_mode, DepthSortMode},
 };
 
 #[test]
@@ -168,6 +168,45 @@ fn pack_world_instances_sorts_by_z_order_and_y_sort_within_same_layer() {
             [12, 0, 0, 255], // z = 1.0, y = 200
             [13, 0, 0, 255], // z = 1.0, y = 300
             [20, 0, 0, 255], // z = 2.0
+        ]
+    );
+}
+
+#[test]
+fn pack_world_instances_composite_layer_y_at_huge_open_world_coordinates() {
+    let mut world = EntityWorld::with_capacity(4);
+
+    // Layer z = 10.0 with huge open-world Y coordinates (500_000.0 vs 500_005.0).
+    let y_high = world.spawn_sprite([100.0, 500_005.0], [16.0, 16.0], [10, 2, 0, 255]);
+    assert!(world.set_z_order(y_high, 10.0));
+    assert!(world.set_flags(y_high, ENTITY_FLAG_VISIBLE | ENTITY_FLAG_Y_SORT));
+
+    let y_low = world.spawn_sprite([100.0, 500_000.0], [16.0, 16.0], [10, 1, 0, 255]);
+    assert!(world.set_z_order(y_low, 10.0));
+    assert!(world.set_flags(y_low, ENTITY_FLAG_VISIBLE | ENTITY_FLAG_Y_SORT));
+
+    // Higher layer z = 11.0 at small Y must still sort AFTER z = 10.0 (would invert in FastFloat).
+    let upper_layer = world.spawn_sprite([100.0, 10.0], [16.0, 16.0], [11, 0, 0, 255]);
+    assert!(world.set_z_order(upper_layer, 11.0));
+    assert!(world.set_flags(upper_layer, ENTITY_FLAG_VISIBLE | ENTITY_FLAG_Y_SORT));
+
+    // Lower layer z = 9.0 at huge Y must still sort BEFORE z = 10.0.
+    let lower_layer = world.spawn_sprite([100.0, 900_000.0], [16.0, 16.0], [9, 0, 0, 255]);
+    assert!(world.set_z_order(lower_layer, 9.0));
+    assert!(world.set_flags(lower_layer, ENTITY_FLAG_VISIBLE | ENTITY_FLAG_Y_SORT));
+
+    let mut out = Vec::new();
+    let count = pack_world_instances_with_mode(&world, None, DepthSortMode::CompositeLayerY, &mut out);
+    assert_eq!(count, 4);
+
+    let ordered_colors: Vec<[u8; 4]> = out.iter().map(|inst| inst.color).collect();
+    assert_eq!(
+        ordered_colors,
+        vec![
+            [9, 0, 0, 255],  // z = 9.0, y = 900_000.0
+            [10, 1, 0, 255], // z = 10.0, y = 500_000.0
+            [10, 2, 0, 255], // z = 10.0, y = 500_005.0
+            [11, 0, 0, 255], // z = 11.0, y = 10.0
         ]
     );
 }

@@ -16,6 +16,16 @@ pub enum CompilerKind {
 }
 
 impl CompilerKind {
+    /// Parses a compiler name (`"gcc"`, `"clang"`, or `"tcc"`, case-insensitive).
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "gcc" => Some(Self::Gcc),
+            "clang" => Some(Self::Clang),
+            "tcc" => Some(Self::Tcc),
+            _ => None,
+        }
+    }
+
     /// Returns the executable name for this compiler toolchain.
     pub fn executable_name(&self) -> &'static str {
         match self {
@@ -25,9 +35,15 @@ impl CompilerKind {
         }
     }
 
-    /// Detects an available C11 compiler (`FGE_CC` override first, then `tcc`, `clang`, `gcc`).
+    /// Detects an available C11 compiler (`FGE_CC` override first, then `gcc`, `clang`, `tcc`).
     pub fn detect() -> Result<(Self, PathBuf), LoaderError> {
-        // TODO(user-decision): Evaluate optional in-process libtcc static linking vs external tcc/clang/gcc driver priority.
+        Self::detect_with_preference(None)
+    }
+
+    /// Detects an available C11 compiler (`FGE_CC` override first, then optional preference, then `gcc`, `clang`, `tcc`).
+    pub fn detect_with_preference(
+        pref: Option<CompilerKind>,
+    ) -> Result<(Self, PathBuf), LoaderError> {
         if let Some(cc) = std::env::var_os("FGE_CC").filter(|v| !v.is_empty()) {
             let cc_path = PathBuf::from(cc);
             if probe_compiler(&cc_path) {
@@ -36,7 +52,17 @@ impl CompilerKind {
             return Err(LoaderError::CompilerNotFound);
         }
 
-        for kind in [Self::Tcc, Self::Clang, Self::Gcc] {
+        if let Some(preferred) = pref {
+            let candidate = PathBuf::from(preferred.executable_name());
+            if probe_compiler(&candidate) {
+                return Ok((preferred, candidate));
+            }
+        }
+
+        for kind in [Self::Gcc, Self::Clang, Self::Tcc] {
+            if Some(kind) == pref {
+                continue;
+            }
             let candidate = PathBuf::from(kind.executable_name());
             if probe_compiler(&candidate) {
                 return Ok((kind, candidate));
@@ -78,6 +104,7 @@ pub struct CBuildPlan {
     pub sources: Vec<String>,
     pub out_dir: PathBuf,
     pub optimize: bool,
+    pub preferred_compiler: Option<CompilerKind>,
 }
 
 /// Embedded copy of `include/fge.h` for standalone single-binary header staging.
@@ -123,7 +150,7 @@ pub fn resolve_source_files(plan: &CBuildPlan) -> Result<Vec<PathBuf>, LoaderErr
 
 /// Compiles the C11 project into a generation-versioned `.so` under `plan.out_dir`.
 pub fn compile_shared_library(plan: &CBuildPlan, generation: u64) -> Result<PathBuf, LoaderError> {
-    let (_kind, compiler_path) = CompilerKind::detect()?;
+    let (_kind, compiler_path) = CompilerKind::detect_with_preference(plan.preferred_compiler)?;
     let include_dir = stage_embedded_header(&plan.out_dir)?;
     let source_files = resolve_source_files(plan)?;
 

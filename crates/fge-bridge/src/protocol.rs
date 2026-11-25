@@ -10,16 +10,31 @@ pub const RPC_ERR_PARSE: i32 = -32700;
 pub const RPC_ERR_METHOD_NOT_FOUND: i32 = -32601;
 pub const RPC_ERR_INVALID_PARAMS: i32 = -32602;
 pub const RPC_ERR_ENTITY_NOT_FOUND: i32 = -32001;
+pub const RPC_ERR_UNAUTHORIZED: i32 = -32003;
 
 /// Mutable per-session state maintained by the AI Bridge alongside `EngineContext`.
 #[derive(Clone, Debug, Default)]
 pub struct BridgeState {
     pub dialogues: Vec<(EntityId, String)>,
+    api_key: Option<String>,
 }
 
 impl BridgeState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a `BridgeState` with an optional API key required to authenticate bridge requests.
+    pub fn with_api_key(api_key: Option<String>) -> Self {
+        Self {
+            dialogues: Vec::new(),
+            api_key: api_key.filter(|k| !k.is_empty()),
+        }
+    }
+
+    /// Returns the configured API key, if authentication is enabled.
+    pub fn api_key(&self) -> Option<&str> {
+        self.api_key.as_deref()
     }
 
     /// Inserts or updates the dialogue/note associated with `entity`.
@@ -517,9 +532,19 @@ fn dispatch_method(
     }
 }
 
-/// Parses and dispatches a single JSON-RPC 2.0 request line against `ctx` and `state`,
-/// returning a single-line JSON response string without a trailing newline.
-pub fn handle_rpc_line(line: &str, ctx: &mut EngineContext, state: &mut BridgeState) -> String {
+/// Parses and dispatches a single JSON-RPC 2.0 request line against `ctx` and `state`
+/// with per-client session authentication tracking (`authenticated`).
+///
+/// When `state.api_key()` is `Some(expected)`, clients may authenticate either by calling
+/// `fge.auth` with `{"api_key": "..."}` (which sets `*authenticated = true` for subsequent
+/// requests on the same connection) or by passing `"api_key"` inside `params` of any call.
+/// Unauthenticated requests fail with JSON-RPC error `-32003`.
+pub fn handle_rpc_line_with_auth(
+    line: &str,
+    ctx: &mut EngineContext,
+    state: &mut BridgeState,
+    authenticated: &mut bool,
+) -> String {
     let req: RpcRequest = match serde_json::from_str(line) {
         Ok(req) => req,
         Err(err) => {
@@ -529,11 +554,51 @@ pub fn handle_rpc_line(line: &str, ctx: &mut EngineContext, state: &mut BridgeSt
     };
 
     let id = req.id.unwrap_or(Value::Null);
+
+    if req.method == "fge.auth" {
+        let provided = req.params.get("api_key").and_then(Value::as_str);
+        let resp = match state.api_key() {
+            None => {
+                *authenticated = true;
+                RpcResponse::ok(id, json!({ "authenticated": true }))
+            }
+            Some(expected) if provided == Some(expected) => {
+                *authenticated = true;
+                RpcResponse::ok(id, json!({ "authenticated": true }))
+            }
+            Some(_) => RpcResponse::err(
+                id,
+                RPC_ERR_UNAUTHORIZED,
+                "Unauthorized: invalid or missing api_key",
+            ),
+        };
+        return serialize_response(&resp);
+    }
+
+    if let Some(expected) = state.api_key() {
+        let param_matches = req.params.get("api_key").and_then(Value::as_str) == Some(expected);
+        if !*authenticated && !param_matches {
+            let resp = RpcResponse::err(
+                id,
+                RPC_ERR_UNAUTHORIZED,
+                "Unauthorized: invalid or missing api_key",
+            );
+            return serialize_response(&resp);
+        }
+    }
+
     let resp = match dispatch_method(req.method.as_str(), req.params, ctx, state) {
         Ok(result) => RpcResponse::ok(id, result),
         Err(error) => RpcResponse::err(id, error.code, error.message),
     };
     serialize_response(&resp)
+}
+
+/// Parses and dispatches a single JSON-RPC 2.0 request line against `ctx` and `state`,
+/// returning a single-line JSON response string without a trailing newline.
+pub fn handle_rpc_line(line: &str, ctx: &mut EngineContext, state: &mut BridgeState) -> String {
+    let mut authenticated = false;
+    handle_rpc_line_with_auth(line, ctx, state, &mut authenticated)
 }
 
 fn serialize_response(resp: &RpcResponse) -> String {

@@ -202,9 +202,11 @@ uint32_t   fge_poll_ai_events(void);
 FgeAiEvent fge_get_ai_event(uint32_t index);
 void       fge_log_metric(uint32_t metric_id, float value);
 
-/* Game Module Entrypoints (Implemented by user C code in Phase A) */
+/* Game Module Entrypoints (Implemented by user C code) */
 void fge_init(void);
 void fge_update(float dt);
+/* Optional hot-reload hook: HotReloader only hot-reloads C modules that export fge_on_reload. */
+void fge_on_reload(void);
 void fge_shutdown(void);
 
 #ifdef __cplusplus

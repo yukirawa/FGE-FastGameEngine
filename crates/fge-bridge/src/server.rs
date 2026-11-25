@@ -5,7 +5,7 @@ use fge_abi::context::EngineContext;
 
 use crate::{
     error::BridgeError,
-    protocol::{handle_rpc_line, BridgeState},
+    protocol::{handle_rpc_line_with_auth, BridgeState},
 };
 
 const READ_CHUNK_SIZE: usize = 4096;
@@ -15,14 +15,13 @@ const MAX_WRITE_WOULDBLOCK_RETRIES: usize = 64;
 struct ClientConn {
     stream: TcpStream,
     read_buf: Vec<u8>,
+    authenticated: bool,
 }
 
 /// Single-threaded, non-blocking TCP NDJSON-RPC 2.0 server for live AI observation and intervention.
 ///
 /// Runs entirely on the main simulation thread with zero background threads and zero
 /// `Arc<Mutex<T>>`, draining pending requests once per frame via [`BridgeServer::poll_frame`].
-// TODO(user-decision): Add optional Unix Domain Socket listener alongside TCP loopback
-// for lower-latency local IPC on Linux/macOS if desired.
 pub struct BridgeServer {
     listener: TcpListener,
     clients: Vec<ClientConn>,
@@ -30,14 +29,20 @@ pub struct BridgeServer {
 }
 
 impl BridgeServer {
-    /// Binds a non-blocking TCP listener at `addr` (e.g. `"127.0.0.1:7777"` or `"127.0.0.1:0"`).
+    /// Binds a non-blocking TCP listener at `addr` (e.g. `"127.0.0.1:7777"` or `"127.0.0.1:0"`)
+    /// without API-key authentication.
     pub fn bind(addr: &str) -> Result<Self, BridgeError> {
+        Self::bind_with_api_key(addr, None)
+    }
+
+    /// Binds a non-blocking TCP listener at `addr` with optional API-key authentication.
+    pub fn bind_with_api_key(addr: &str, api_key: Option<String>) -> Result<Self, BridgeError> {
         let listener = TcpListener::bind(addr)?;
         listener.set_nonblocking(true)?;
         Ok(Self {
             listener,
             clients: Vec::new(),
-            state: BridgeState::new(),
+            state: BridgeState::with_api_key(api_key),
         })
     }
 
@@ -95,6 +100,7 @@ impl BridgeServer {
                     self.clients.push(ClientConn {
                         stream,
                         read_buf: Vec::new(),
+                        authenticated: false,
                     });
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
@@ -150,7 +156,9 @@ fn poll_client(
             None
         } else {
             let resp = match std::str::from_utf8(trimmed_bytes) {
-                Ok(line_str) => handle_rpc_line(line_str, ctx, state),
+                Ok(line_str) => {
+                    handle_rpc_line_with_auth(line_str, ctx, state, &mut client.authenticated)
+                }
                 Err(_) => {
                     r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error: invalid UTF-8"}}"#
                         .to_owned()
