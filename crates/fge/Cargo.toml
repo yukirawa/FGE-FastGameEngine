@@ -1,0 +1,27 @@
+[package]
+name = "fge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "fge"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fge"
+path = "src/main.rs"
+
+[dependencies]
+fge-core.workspace = true
+fge-render.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+glam.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+log.workspace = true
+env_logger.workspace = true
