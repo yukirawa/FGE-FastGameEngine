@@ -1,21 +1,365 @@
-use fge_core::stats::BenchSummary;
+use std::{sync::Arc, time::Instant};
 
-use crate::{
-    cli::{BenchArgs, Cli, RunArgs},
-    error::AppError,
+use fge_core::{
+    camera::Camera2D,
+    sim::{BulkSimulation, SimConfig, SpriteSoA},
+    stats::{BenchSummary, FrameStatsTracker},
+};
+use fge_render::{
+    context::{FrameRenderStats, GpuRenderer, PresentPolicy},
+    error::RenderError,
+};
+use winit::{
+    application::ApplicationHandler,
+    dpi::LogicalSize,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle},
+    keyboard::KeyCode,
+    window::{Window, WindowId},
 };
 
+use crate::{
+    cli::{BenchArgs, Cli, Command, RunArgs},
+    config::load_manifest_from_path,
+    error::AppError,
+    input::InputState,
+};
+
+const CLEAR_COLOR: wgpu::Color = wgpu::Color {
+    r: 0.05,
+    g: 0.06,
+    b: 0.09,
+    a: 1.0,
+};
+const FIXED_DT: f32 = 1.0 / 60.0;
+const MAX_FRAME_DT: f32 = 0.1;
+const DEFAULT_OFFSCREEN_FRAMES: u64 = 300;
+const DEMO_PROJECT_SPRITE_COUNT: usize = 10_000;
+
 /// Executes the parsed CLI command and returns an optional `BenchSummary`.
-pub fn execute_cli(_cli: Cli) -> Result<Option<BenchSummary>, AppError> {
-    todo!("execute_cli")
+pub fn execute_cli(cli: Cli) -> Result<Option<BenchSummary>, AppError> {
+    match cli.command {
+        Command::Bench(args) => {
+            let summary = run_bench(&args)?;
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&summary)?);
+            } else {
+                log::info!(
+                    "Bench complete: {} frames, {} sprites ({} rendered, {} draw call/frame), avg {:.3} ms ({:.1} FPS, p99 {:.3} ms) on {} [{}]",
+                    summary.total_frames,
+                    summary.sprite_count,
+                    summary.rendered_instances,
+                    summary.draw_calls_per_frame,
+                    summary.avg_frame_ms,
+                    summary.avg_fps,
+                    summary.p99_frame_ms,
+                    summary.adapter_name,
+                    summary.backend_name,
+                );
+                println!(
+                    "FGE Bench Summary: frames={} sprites={} rendered={} draw_calls={} avg_fps={:.1} avg_ms={:.3} min_ms={:.3} max_ms={:.3} p99_ms={:.3} target_60fps={} backend={} adapter={} offscreen={}",
+                    summary.total_frames,
+                    summary.sprite_count,
+                    summary.rendered_instances,
+                    summary.draw_calls_per_frame,
+                    summary.avg_fps,
+                    summary.avg_frame_ms,
+                    summary.min_frame_ms,
+                    summary.max_frame_ms,
+                    summary.p99_frame_ms,
+                    summary.target_60fps_met,
+                    summary.backend_name,
+                    summary.adapter_name,
+                    summary.offscreen,
+                );
+            }
+            Ok(Some(summary))
+        }
+        Command::Run(args) => run_project(&args),
+    }
 }
 
 /// Runs the 1-draw-call `SpriteSoA` + `wgpu` rendering benchmark (either windowed via `winit` or offscreen).
-pub fn run_bench(_args: &BenchArgs) -> Result<BenchSummary, AppError> {
-    todo!("run_bench")
+pub fn run_bench(args: &BenchArgs) -> Result<BenchSummary, AppError> {
+    let title = format!("FGE Benchmark ({} sprites)", args.count);
+    run_bench_with_title(args, &title)
 }
 
 /// Loads `game.toml` and boots the engine shell for the target game directory.
-pub fn run_project(_args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
-    todo!("run_project")
+pub fn run_project(args: &RunArgs) -> Result<Option<BenchSummary>, AppError> {
+    let manifest = load_manifest_from_path(&args.project_dir)?;
+    log::info!(
+        "Booting '{}' ({}x{}, target {} FPS, vsync={}, entry={})",
+        manifest.game.title,
+        manifest.game.width,
+        manifest.game.height,
+        manifest.game.target_fps,
+        manifest.game.vsync,
+        manifest.build.entry,
+    );
+    let bench_args = BenchArgs {
+        count: DEMO_PROJECT_SPRITE_COUNT,
+        width: manifest.game.width,
+        height: manifest.game.height,
+        frames: args.frames,
+        offscreen: args.offscreen,
+        vsync: manifest.game.vsync,
+        cull: true,
+        seed: 42,
+        json: false,
+    };
+    let summary = run_bench_with_title(&bench_args, &manifest.game.title)?;
+    Ok(Some(summary))
+}
+
+fn run_bench_with_title(args: &BenchArgs, window_title: &str) -> Result<BenchSummary, AppError> {
+    if args.width == 0 || args.height == 0 {
+        return Err(AppError::Render(RenderError::InvalidResolution {
+            width: args.width,
+            height: args.height,
+        }));
+    }
+
+    let sim_cfg = SimConfig {
+        world_width: args.width as f32,
+        world_height: args.height as f32,
+        ..SimConfig::default()
+    };
+    let mut soa = SpriteSoA::spawn_random_batch(args.count, args.seed, &sim_cfg)?;
+    let camera = Camera2D::from_top_left_viewport(args.width as f32, args.height as f32)?;
+
+    if args.offscreen {
+        let mut renderer = GpuRenderer::new_offscreen(args.width, args.height, args.count.max(1))?;
+        let target_frames = if args.frames == 0 {
+            DEFAULT_OFFSCREEN_FRAMES
+        } else {
+            args.frames
+        };
+        let mut tracker = FrameStatsTracker::with_capacity(target_frames.min(100_000) as usize);
+        let mut last_stats = FrameRenderStats::default();
+        let bounds_w = args.width as f32;
+        let bounds_h = args.height as f32;
+
+        for _ in 0..target_frames {
+            let frame_start = Instant::now();
+            soa.step(FIXED_DT, bounds_w, bounds_h)?;
+            last_stats = renderer.render_soa(&camera, &soa, args.cull, CLEAR_COLOR)?;
+            let frame_ms = frame_start.elapsed().as_secs_f64() * 1000.0;
+            tracker.record_frame_ms(frame_ms);
+        }
+
+        let info = renderer.adapter_info();
+        let backend_name = format!("{:?}", info.backend);
+        return Ok(tracker.summarize(
+            args.count,
+            last_stats.submitted_instances,
+            last_stats.draw_calls,
+            &backend_name,
+            &info.name,
+            true,
+        ));
+    }
+
+    let event_loop = EventLoop::new()?;
+    event_loop.set_control_flow(ControlFlow::Poll);
+    let display_handle = event_loop.owned_display_handle();
+    let initial_cap = if args.frames > 0 {
+        args.frames.min(100_000) as usize
+    } else {
+        1024
+    };
+
+    let mut app = WindowedBenchApp {
+        args,
+        title: window_title,
+        display_handle: Some(display_handle),
+        window: None,
+        renderer: None,
+        camera,
+        soa,
+        input: InputState::new(),
+        tracker: FrameStatsTracker::with_capacity(initial_cap),
+        last_stats: FrameRenderStats::default(),
+        last_frame_instant: None,
+        bounds_w: args.width as f32,
+        bounds_h: args.height as f32,
+        fatal_error: None,
+    };
+
+    event_loop.run_app(&mut app)?;
+
+    if let Some(err) = app.fatal_error {
+        return Err(err);
+    }
+
+    let (backend_name, adapter_name) = match app.renderer.as_ref() {
+        Some(renderer) => {
+            let info = renderer.adapter_info();
+            (format!("{:?}", info.backend), info.name.as_str())
+        }
+        None => (String::from("Unknown"), "Unknown"),
+    };
+
+    Ok(app.tracker.summarize(
+        args.count,
+        app.last_stats.submitted_instances,
+        app.last_stats.draw_calls,
+        &backend_name,
+        adapter_name,
+        false,
+    ))
+}
+
+struct WindowedBenchApp<'a> {
+    args: &'a BenchArgs,
+    title: &'a str,
+    display_handle: Option<OwnedDisplayHandle>,
+    window: Option<Arc<Window>>,
+    renderer: Option<GpuRenderer>,
+    camera: Camera2D,
+    soa: SpriteSoA,
+    input: InputState,
+    tracker: FrameStatsTracker,
+    last_stats: FrameRenderStats,
+    last_frame_instant: Option<Instant>,
+    bounds_w: f32,
+    bounds_h: f32,
+    fatal_error: Option<AppError>,
+}
+
+impl ApplicationHandler for WindowedBenchApp<'_> {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+
+        let attrs = Window::default_attributes()
+            .with_title(self.title)
+            .with_inner_size(LogicalSize::new(self.args.width, self.args.height));
+
+        let window = match event_loop.create_window(attrs) {
+            Ok(w) => Arc::new(w),
+            Err(err) => {
+                self.fatal_error = Some(AppError::WindowOs(err));
+                event_loop.exit();
+                return;
+            }
+        };
+
+        let physical = window.inner_size();
+        let init_w = physical.width.max(1);
+        let init_h = physical.height.max(1);
+        let policy = if self.args.vsync {
+            PresentPolicy::Fifo
+        } else {
+            PresentPolicy::AutoNoVsync
+        };
+
+        let instance_desc = match self.display_handle.take() {
+            Some(handle) => {
+                wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(handle))
+            }
+            None => wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+        };
+
+        match GpuRenderer::new_windowed(
+            instance_desc,
+            Arc::clone(&window),
+            init_w,
+            init_h,
+            policy,
+            self.args.count.max(1),
+        ) {
+            Ok(renderer) => {
+                self.bounds_w = init_w as f32;
+                self.bounds_h = init_h as f32;
+                if let Ok(cam) = Camera2D::from_top_left_viewport(self.bounds_w, self.bounds_h) {
+                    self.camera = cam;
+                }
+                self.renderer = Some(renderer);
+                self.window = Some(window);
+                self.last_frame_instant = Some(Instant::now());
+            }
+            Err(err) => {
+                self.fatal_error = Some(AppError::Render(err));
+                event_loop.exit();
+            }
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        self.input.process_window_event(&event);
+
+        if self.input.close_requested() || self.input.is_key_just_pressed(KeyCode::Escape) {
+            event_loop.exit();
+            return;
+        }
+
+        if let Some((w, h)) = self.input.take_resized() {
+            if w > 0 && h > 0 {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    if let Err(err) = renderer.resize(w, h) {
+                        self.fatal_error = Some(AppError::Render(err));
+                        event_loop.exit();
+                        return;
+                    }
+                }
+                self.bounds_w = w as f32;
+                self.bounds_h = h as f32;
+                if let Ok(cam) = Camera2D::from_top_left_viewport(self.bounds_w, self.bounds_h) {
+                    self.camera = cam;
+                }
+            }
+        }
+
+        if matches!(event, WindowEvent::RedrawRequested) {
+            let Some(renderer) = self.renderer.as_mut() else {
+                return;
+            };
+
+            let frame_start = Instant::now();
+            let dt = match self.last_frame_instant.replace(frame_start) {
+                Some(prev) => prev.elapsed().as_secs_f32().clamp(0.0, MAX_FRAME_DT),
+                None => FIXED_DT,
+            };
+
+            if let Err(err) = self.soa.step(dt, self.bounds_w, self.bounds_h) {
+                self.fatal_error = Some(AppError::Core(err));
+                event_loop.exit();
+                return;
+            }
+
+            match renderer.render_soa(&self.camera, &self.soa, self.args.cull, CLEAR_COLOR) {
+                Ok(stats) => {
+                    if !stats.skipped {
+                        let frame_ms = frame_start.elapsed().as_secs_f64() * 1000.0;
+                        self.tracker.record_frame_ms(frame_ms);
+                        self.last_stats = stats;
+                    }
+                }
+                Err(err) => {
+                    self.fatal_error = Some(AppError::Render(err));
+                    event_loop.exit();
+                    return;
+                }
+            }
+
+            self.input.begin_frame();
+
+            if self.args.frames > 0 && self.tracker.frame_count() >= self.args.frames {
+                event_loop.exit();
+            }
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
 }

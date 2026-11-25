@@ -73,10 +73,10 @@ pub struct RunArgs {
 }
 
 /// Parses CLI arguments from an arbitrary iterator (test-friendly wrapper).
-pub fn parse_cli_from<I, T>(_itr: I) -> Result<Cli, clap::Error>
+pub fn parse_cli_from<I, T>(itr: I) -> Result<Cli, clap::Error>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    todo!("parse_cli_from")
+    Cli::try_parse_from(itr)
 }
