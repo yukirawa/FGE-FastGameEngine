@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/fge-core",
+    "crates/fge-abi",
     "crates/fge-render",
     "crates/fge",
 ]
@@ -13,6 +14,7 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 fge-core = { path = "crates/fge-core" }
+fge-abi = { path = "crates/fge-abi" }
 fge-render = { path = "crates/fge-render" }
 wgpu = "30.0.1"
 winit = "0.30.13"
@@ -27,6 +29,7 @@ thiserror = "2.0.21"
 log = "0.4.35"
 env_logger = "0.11.12"
 fastrand = "2.5.0"
+libloading = "0.8.9"
 
 [profile.release]
 opt-level = 3

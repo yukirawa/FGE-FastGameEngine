@@ -4,6 +4,10 @@ pub mod context;
 pub mod error;
 pub mod instance;
 pub mod pipeline;
+pub mod world_batch;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod phase2_tests;

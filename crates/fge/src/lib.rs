@@ -5,6 +5,10 @@ pub mod cli;
 pub mod config;
 pub mod error;
 pub mod input;
+pub mod keymap;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod phase2_tests;

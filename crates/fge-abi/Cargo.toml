@@ -1,0 +1,11 @@
+[package]
+name = "fge-abi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fge-core.workspace = true
+glam.workspace = true
+fastrand.workspace = true
+thiserror.workspace = true

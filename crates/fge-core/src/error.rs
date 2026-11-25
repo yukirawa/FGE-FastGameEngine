@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-/// Errors produced by `fge-core` math and simulation primitives.
+/// Errors produced by `fge-core` math, spatial grid, and simulation primitives.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum CoreError {
     #[error("invalid dimensions: width={width}, height={height} (must be finite and > 0)")]
@@ -17,4 +17,10 @@ pub enum CoreError {
 
     #[error("invalid speed parameter: {value} (must be finite and >= 0)")]
     InvalidSpeed { value: f32 },
+
+    #[error("invalid spatial grid cell size: {cell_size} (must be finite and > 0)")]
+    InvalidCellSize { cell_size: f32 },
+
+    #[error("invalid spatial grid bucket count: {buckets} (must be a non-zero power of two)")]
+    InvalidBucketCount { buckets: usize },
 }
