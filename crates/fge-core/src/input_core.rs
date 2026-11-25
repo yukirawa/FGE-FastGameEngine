@@ -39,8 +39,42 @@ pub enum FgeKey {
 impl FgeKey {
     pub const COUNT: usize = 32;
 
-    pub fn from_u32(_code: u32) -> Option<Self> {
-        todo!("FgeKey::from_u32")
+    pub fn from_u32(code: u32) -> Option<Self> {
+        match code {
+            0 => Some(Self::Unknown),
+            1 => Some(Self::Up),
+            2 => Some(Self::Down),
+            3 => Some(Self::Left),
+            4 => Some(Self::Right),
+            5 => Some(Self::W),
+            6 => Some(Self::A),
+            7 => Some(Self::S),
+            8 => Some(Self::D),
+            9 => Some(Self::Z),
+            10 => Some(Self::X),
+            11 => Some(Self::C),
+            12 => Some(Self::Space),
+            13 => Some(Self::LShift),
+            14 => Some(Self::RShift),
+            15 => Some(Self::Enter),
+            16 => Some(Self::Escape),
+            17 => Some(Self::Digit0),
+            18 => Some(Self::Digit1),
+            19 => Some(Self::Digit2),
+            20 => Some(Self::Digit3),
+            21 => Some(Self::Digit4),
+            22 => Some(Self::Digit5),
+            23 => Some(Self::Digit6),
+            24 => Some(Self::Digit7),
+            25 => Some(Self::Digit8),
+            26 => Some(Self::Digit9),
+            27 => Some(Self::Q),
+            28 => Some(Self::E),
+            29 => Some(Self::R),
+            30 => Some(Self::F),
+            31 => Some(Self::Tab),
+            _ => None,
+        }
     }
 }
 
@@ -53,8 +87,13 @@ pub enum FgeMouseButton {
 }
 
 impl FgeMouseButton {
-    pub fn from_u32(_code: u32) -> Option<Self> {
-        todo!("FgeMouseButton::from_u32")
+    pub fn from_u32(code: u32) -> Option<Self> {
+        match code {
+            0 => Some(Self::Left),
+            1 => Some(Self::Right),
+            2 => Some(Self::Middle),
+            _ => None,
+        }
     }
 }
 
@@ -75,40 +114,70 @@ impl CoreInputState {
     }
 
     /// Clears single-frame edge bits (`pressed_bits`, `released_bits`, `mouse_wheel`).
+    #[inline]
     pub fn begin_frame(&mut self) {
-        todo!("CoreInputState::begin_frame")
+        self.pressed_bits = 0;
+        self.released_bits = 0;
+        self.mouse_wheel = [0.0, 0.0];
     }
 
-    pub fn set_key_state(&mut self, _key: FgeKey, _pressed: bool) {
-        todo!("CoreInputState::set_key_state")
+    #[inline]
+    pub fn set_key_state(&mut self, key: FgeKey, pressed: bool) {
+        if key == FgeKey::Unknown {
+            return;
+        }
+        let bit = 1u64 << (key as u32);
+        if pressed {
+            if (self.down_bits & bit) == 0 {
+                self.pressed_bits |= bit;
+            }
+            self.down_bits |= bit;
+        } else {
+            if (self.down_bits & bit) != 0 {
+                self.released_bits |= bit;
+            }
+            self.down_bits &= !bit;
+        }
     }
 
-    pub fn set_mouse_button(&mut self, _button: FgeMouseButton, _pressed: bool) {
-        todo!("CoreInputState::set_mouse_button")
+    #[inline]
+    pub fn set_mouse_button(&mut self, button: FgeMouseButton, pressed: bool) {
+        let bit = 1u8 << (button as u32);
+        if pressed {
+            self.mouse_down_bits |= bit;
+        } else {
+            self.mouse_down_bits &= !bit;
+        }
     }
 
-    pub fn set_mouse_pos(&mut self, _x: f32, _y: f32) {
-        self.mouse_pos = [_x, _y];
+    #[inline]
+    pub fn set_mouse_pos(&mut self, x: f32, y: f32) {
+        self.mouse_pos = [x, y];
     }
 
-    pub fn add_mouse_wheel(&mut self, _dx: f32, _dy: f32) {
-        self.mouse_wheel[0] += _dx;
-        self.mouse_wheel[1] += _dy;
+    #[inline]
+    pub fn add_mouse_wheel(&mut self, dx: f32, dy: f32) {
+        self.mouse_wheel[0] += dx;
+        self.mouse_wheel[1] += dy;
     }
 
-    pub fn is_key_down(&self, _key: FgeKey) -> bool {
-        todo!("CoreInputState::is_key_down")
+    #[inline]
+    pub fn is_key_down(&self, key: FgeKey) -> bool {
+        key != FgeKey::Unknown && (self.down_bits & (1u64 << (key as u32))) != 0
     }
 
-    pub fn is_key_pressed(&self, _key: FgeKey) -> bool {
-        todo!("CoreInputState::is_key_pressed")
+    #[inline]
+    pub fn is_key_pressed(&self, key: FgeKey) -> bool {
+        key != FgeKey::Unknown && (self.pressed_bits & (1u64 << (key as u32))) != 0
     }
 
-    pub fn is_key_released(&self, _key: FgeKey) -> bool {
-        todo!("CoreInputState::is_key_released")
+    #[inline]
+    pub fn is_key_released(&self, key: FgeKey) -> bool {
+        key != FgeKey::Unknown && (self.released_bits & (1u64 << (key as u32))) != 0
     }
 
-    pub fn is_mouse_down(&self, _button: FgeMouseButton) -> bool {
-        todo!("CoreInputState::is_mouse_down")
+    #[inline]
+    pub fn is_mouse_down(&self, button: FgeMouseButton) -> bool {
+        (self.mouse_down_bits & (1u8 << (button as u32))) != 0
     }
 }

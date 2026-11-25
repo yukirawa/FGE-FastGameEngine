@@ -527,6 +527,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "env_logger",
+ "fge-abi",
  "fge-core",
  "fge-render",
  "glam",
@@ -537,6 +538,16 @@ dependencies = [
  "toml",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "fge-abi"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "fge-core",
+ "glam",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
