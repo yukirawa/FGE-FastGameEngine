@@ -14,6 +14,8 @@ cargo install --path crates/fge --root ~/.local --locked --offline
 
 これにより `fge` バイナリが `~/.local/bin` にインストールされ、どのディレクトリからでも `fge run ./my_game` を実行できるようになります（`~/.local/bin` が `PATH` に含まれていることを確認してください）。
 
+新規プロジェクトは `fge new my_game && cd my_game && fge run .` で雛形（`game.toml` + `src/main.c`）を生成して起動できます。
+
 新規プロジェクトの作成に必要なのは、`game.toml` と C ソースファイルを含むディレクトリだけです（`fge.h` は組み込まれているため、インクルードパスの指定は不要です）。
 
 ---

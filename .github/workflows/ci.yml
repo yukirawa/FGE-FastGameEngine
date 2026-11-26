@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Portable codegen for CI (the repo's `target-cpu=native` would tie results to the runner CPU).
+  RUSTFLAGS: "-C target-cpu=x86-64-v3 -C link-arg=-Wl,--export-dynamic"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc clang pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxi-dev libxrandr-dev libvulkan1 mesa-vulkan-drivers
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check C headers and example games
+        run: |
+          gcc -fsyntax-only -std=c11 -Wall -Wextra -Werror -pedantic include/fge.h
+          for d in demo_game neon_survivors crystal_chronicle; do
+            gcc -fsyntax-only -std=c11 -Wall -Wextra -Werror -pedantic -I include -I examples/$d/src examples/$d/src/*.c
+          done
+      - name: Test workspace crates
+        run: |
+          for crate in fge-core fge-audio fge-abi fge-loader fge-bridge fge-render fge; do
+            cargo test -p "$crate" --lib
+          done

@@ -8,6 +8,7 @@ pub mod config;
 pub mod error;
 pub mod input;
 pub mod keymap;
+pub mod scaffold;
 
 #[cfg(test)]
 mod tests;
@@ -23,3 +24,6 @@ mod phase4_tests;
 
 #[cfg(test)]
 mod phase5_tests;
+
+#[cfg(test)]
+mod phase6_tests;

@@ -18,6 +18,8 @@ pub enum Command {
     Run(RunArgs),
     /// Run a `game.toml` project headlessly without GPU/windowing and emit diagnostics.
     Test(TestArgs),
+    /// Scaffold a new FGE C11 game project directory.
+    New(NewArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Args)]
@@ -107,6 +109,16 @@ pub struct TestArgs {
     /// Print the full `HeadlessTestReport` as pretty JSON to stdout.
     #[arg(long, default_value_t = false)]
     pub dump_json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Args)]
+pub struct NewArgs {
+    /// Project name (letters, digits, `-`, and `_` only).
+    pub name: String,
+
+    /// Parent directory in which `<name>` will be created.
+    #[arg(long, default_value = ".")]
+    pub dir: PathBuf,
 }
 
 /// Parses CLI arguments from an arbitrary iterator (test-friendly wrapper).

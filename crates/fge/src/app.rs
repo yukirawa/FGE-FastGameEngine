@@ -35,11 +35,12 @@ use winit::{
 };
 
 use crate::{
-    cli::{BenchArgs, Cli, Command, RunArgs, TestArgs},
+    cli::{BenchArgs, Cli, Command, NewArgs, RunArgs, TestArgs},
     config::{load_manifest_from_path, GameManifest, GameSection, UiSection, YSortModeConfig},
     error::AppError,
     input::InputState,
     keymap::apply_window_event_to_core_input,
+    scaffold::scaffold_project,
 };
 
 const CLEAR_COLOR: wgpu::Color = wgpu::Color {
@@ -120,7 +121,23 @@ pub fn execute_cli(cli: Cli) -> Result<Option<BenchSummary>, AppError> {
             }
             Ok(None)
         }
+        Command::New(args) => {
+            run_new(&args)?;
+            Ok(None)
+        }
     }
+}
+
+/// Scaffolds a new FGE C11 project directory and prints a next-step run hint.
+pub fn run_new(args: &NewArgs) -> Result<(), AppError> {
+    let project_dir = scaffold_project(&args.dir, &args.name)?;
+    println!(
+        "Created FGE project '{}' at {}\nNext step:\n  cd {} && fge run .",
+        args.name,
+        project_dir.display(),
+        args.name
+    );
+    Ok(())
 }
 
 /// Runs the 1-draw-call `SpriteSoA` + `wgpu` rendering benchmark (either windowed via `winit` or offscreen).
